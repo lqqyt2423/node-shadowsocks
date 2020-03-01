@@ -1,0 +1,19 @@
+{
+  "name": "node-shadowsocks",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "bin": {
+    "ss-local": "./bin/local.js",
+    "ss-server": "./bin/server.js"
+  },
+  "devDependencies": {
+    "eslint": "^6.8.0",
+    "nodemon": "^2.0.2"
+  },
+  "author": "",
+  "license": "ISC"
+}
