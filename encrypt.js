@@ -12,9 +12,40 @@ const cipherInfoMap = {
   'aes-256-ctr': { keyLen: 32, ivLen: 16 },
 };
 
-// TODO
+function md5(b) {
+  return crypto.createHash('md5').update(b).digest();
+}
+
+// copy from shadowsocks-go evpBytesToKey
+function _evpBytesToKey(password, keyLen) {
+  password = Buffer.from(password);
+  const md5Len = 16;
+  const cnt = parseInt((keyLen - 1) / md5Len) + 1;
+  const m = Buffer.allocUnsafe(cnt * md5Len);
+  md5(password).copy(m);
+
+  // Repeatedly call md5 until bytes generated is enough.
+  // Each call to md5 uses data: prev md5 sum + password.
+  const d = Buffer.allocUnsafe(md5Len + password.length);
+  let start = 0;
+  for (let i = 0; i < cnt; i++) {
+    start += md5Len;
+    m.copy(d, 0, start - md5Len, start);
+    password.copy(d, md5Len);
+    md5(d).copy(m, start);
+  }
+
+  return m.slice(0, keyLen);
+}
+
+const keyCache = new Map();
 function evpBytesToKey(password, keyLen) {
-  return Buffer.alloc(keyLen);
+  const cacheKey = password + keyLen;
+  let value = keyCache.get(cacheKey);
+  if (value) return value;
+  value = _evpBytesToKey(password, keyLen);
+  keyCache.set(cacheKey, value);
+  return value;
 }
 
 class Encryptor extends Transform {
