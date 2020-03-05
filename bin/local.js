@@ -172,6 +172,11 @@ class SocketHandler {
       this.socket.pipe(encryptor).pipe(proxy);
 
       const decryptor = new Decryptor(this.cipherMethod, this.cipherPassword);
+      decryptor.on('error', (err) => {
+        this.logger.error(err);
+        this.socket.end();
+        proxy.end();
+      });
       proxy.pipe(decryptor).pipe(this.socket);
     });
   }
