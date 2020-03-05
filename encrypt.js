@@ -57,6 +57,8 @@ class Decryptor extends Transform {
   update(chunk) {
     if (this.isGetIv) return this.cipher.update(chunk);
 
+    if (chunk.length < this.ivLen) throw new Error('invalid iv data');
+
     this.iv = chunk.slice(0, this.ivLen);
     this.isGetIv = true;
     this.cipher = crypto.createDecipheriv(this.method, this.key, this.iv);
