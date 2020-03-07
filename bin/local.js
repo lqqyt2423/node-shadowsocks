@@ -23,6 +23,7 @@ class SocketHandler {
   init() {
     this.socket.setTimeout(this.timeout);
     this.socket.on('error', err => {
+      this.logger.warn('socket error');
       this.logger.error(err);
       if (!this.socket.destroyed) this.socket.destroy();
     });
@@ -149,6 +150,7 @@ class SocketHandler {
     proxy.setTimeout(this.timeout);
 
     proxy.on('error', (err) => {
+      this.logger.warn('proxy error');
       this.logger.error(err);
       if (!replyed) this.reply(0x05);
       if (!proxy.destroyed) proxy.destroy();
@@ -167,12 +169,13 @@ class SocketHandler {
       replyed = true;
 
       const encryptor = new Encryptor(this.cipherMethod, this.cipherPassword);
-      const firstData = encryptor.update(rawAddr);
-      proxy.write(firstData);
-      this.socket.pipe(encryptor).pipe(proxy);
+      encryptor.pipe(proxy);
+      encryptor.write(rawAddr);
+      this.socket.pipe(encryptor);
 
       const decryptor = new Decryptor(this.cipherMethod, this.cipherPassword);
       decryptor.on('error', (err) => {
+        this.logger.warn('decryptor error');
         this.logger.error(err);
         this.socket.end();
         proxy.end();

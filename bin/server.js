@@ -7,7 +7,7 @@ const dns = require('dns');
 const util = require('util');
 const ipv6 = require('../ipv6');
 const config = require('../config');
-const { Encryptor, Decryptor, cipherInfoMap } = require('../encrypt');
+const { Encryptor, Decryptor } = require('../encrypt');
 const logger = console;
 
 class SocketHandler {
@@ -17,8 +17,11 @@ class SocketHandler {
     this.timeout = (options.timeout || 300) * 1000;
     this.cipherMethod = options.method;
     this.cipherPassword = options.password;
-    this.ivLen = cipherInfoMap[this.cipherMethod].ivLen;
-    this.decryptor = new Decryptor(this.cipherMethod, this.cipherPassword);
+    this.decryptor = new Decryptor(this.cipherMethod, this.cipherPassword, { emitFirstPayload: true });
+
+    this.proxy = null;
+    this._beforeProxyBuffer = Buffer.allocUnsafe(0);
+    this._proxyOk = false;
 
     this.init();
   }
@@ -26,6 +29,7 @@ class SocketHandler {
   init() {
     this.socket.setTimeout(this.timeout);
     this.socket.on('error', err => {
+      this.logger.warn('socket error');
       this.logger.error(err);
       if (!this.socket.destroyed) this.socket.destroy();
     });
@@ -34,30 +38,26 @@ class SocketHandler {
       this.logger.warn('socket timeout');
       this.socket.end();
     });
-  }
 
-  consume() {
-    return new Promise(resolve => {
-      this.socket.once('data', resolve);
+    this.decryptor.on('error', (err) => {
+      this.logger.warn('decryptor error');
+      this.logger.error(err);
+      this.socket.end();
+      if (this.proxy) this.proxy.end();
     });
   }
 
-  async handle() {
-    const addressData = await this.consume();
-    // 7: ipv4 rawAddr len
-    if (addressData.length < this.ivLen + 7) {
-      this.logger.warn('invalid data');
-      this.socket.end();
-      return;
-    }
-    const rawAddr = this.decryptor.update(addressData);
-
-    // parse address
+  async parseAddress(rawAddr) {
     const rawAddrLen = rawAddr.length;
     let dstHost, dstPort;
     let isDomain = false;
     let remainDataIndex = -1;
     if (rawAddr[0] === 0x01) { // ipv4
+      if (rawAddr.length < 7) {
+        this.logger.warn('invalid ipv4 data');
+        this.socket.end();
+        return;
+      }
       dstHost = `${rawAddr[1]}.${rawAddr[2]}.${rawAddr[3]}.${rawAddr[4]}`;
       dstPort = (rawAddr[5] << 8) | rawAddr[6];
       if (rawAddrLen > 7) remainDataIndex = 7;
@@ -91,16 +91,13 @@ class SocketHandler {
       return;
     }
 
-    // The data will be lost if there is no listener when a Socket emits a 'data' event
-    // so should pipe here in case lost data
-    this.socket.pipe(this.decryptor);
-
     // find ip by dns
     if (isDomain) {
       try {
         const ips = await util.promisify(dns.resolve4)(dstHost);
         dstHost = ips[0];
       } catch (err) {
+        this.logger.warn('dns error');
         this.logger.error(err);
         this.socket.end();
         return;
@@ -109,11 +106,17 @@ class SocketHandler {
 
     this.logger.info('address: %s:%s', dstHost, dstPort);
 
+    const firstProxyPayload = remainDataIndex > -1 ? rawAddr.slice(remainDataIndex) : null;
+    this.handleProxy(dstPort, dstHost, firstProxyPayload);
+  }
+
+  handleProxy(port, host, firstProxyPayload) {
     // connect to real remote
-    const proxy = net.createConnection(dstPort, dstHost);
+    const proxy = this.proxy = net.createConnection(port, host);
     proxy.setTimeout(this.timeout);
 
     proxy.on('error', (err) => {
+      this.logger.warn('proxy error');
       this.logger.error(err);
       if (!proxy.destroyed) proxy.destroy();
       this.socket.end();
@@ -126,12 +129,28 @@ class SocketHandler {
     });
 
     proxy.once('connect', () => {
-      if (remainDataIndex > -1) proxy.write(rawAddr.slice(remainDataIndex));
-      this.decryptor.pipe(proxy);
-
       const encryptor = new Encryptor(this.cipherMethod, this.cipherPassword);
       proxy.pipe(encryptor).pipe(this.socket);
+
+      if (firstProxyPayload) proxy.write(firstProxyPayload);
+      if (this._beforeProxyBuffer.length) proxy.write(this._beforeProxyBuffer);
+      this._beforeProxyBuffer = null;
+      this._proxyOk = true;
     });
+  }
+
+  async handle() {
+    this.decryptor.once('firstPayload', this.parseAddress.bind(this));
+
+    this.decryptor.on('data', chunk => {
+      if (this._proxyOk) {
+        this.proxy.write(chunk);
+      } else {
+        this._beforeProxyBuffer = Buffer.concat([this._beforeProxyBuffer, chunk]);
+      }
+    });
+
+    this.socket.pipe(this.decryptor);
   }
 }
 
