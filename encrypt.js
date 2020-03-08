@@ -7,6 +7,8 @@ const hkdf = require('futoin-hkdf');
 // the maximum size of payload in bytes
 const MAX_PAYLOAD = 0x3fff;
 
+const ZERO_BUF = Buffer.allocUnsafe(0);
+
 // nonce size: 12, tag size: 16
 const cipherInfoMap = {
   'chacha20-poly1305': { keyLen: 32, saltLen: 32 },
@@ -123,127 +125,139 @@ class Decryptor extends Transform {
     this.keyLen = keyLen;
     this.saltLen = saltLen;
     this.mainkey = evpBytesToKey(password, keyLen);
-    this.isGetSalt = false;
+    this.isGotSalt = false;
     this.nonce = Buffer.alloc(12);
 
     this.salt = null;
     this.key = null;
 
-    this._buf = null;
-    this._chunkLen = 0;
-    this._cipher2 = null;
-    this._readedChunkLen = 0;
-    this._waitAuthTag = false;
-
-    this.isGotFirstPayload = true;
-    this.firstPayload = null;
     // will emit "firstPayload" event but not transform firstPayload
-    if (options.emitFirstPayload === true) {
-      this.isGotFirstPayload = false;
-      this.firstPayload = Buffer.allocUnsafe(0);
-    }
+    this.emitFirstPayload = options.emitFirstPayload || false;
+    this._emitedFirstPayload = false;
+    this._firstPayloadBuffer = this.emitFirstPayload ? ZERO_BUF : null;
+
+    // unhandled buffer last time
+    this._buf = ZERO_BUF;
+    this._state = 1;
+    this._payloadLen = 0;
+    this._handledPayloadLen = 0;
+    this._cipher2 = null;
   }
 
+  // after got salt, handle payload state:
+  // 1                                    2                  3            4
+  // 1 - only begin, not have _buf
+  // [encrypted payload length][length tag][encrypted payload][payload tag]
   update(chunk) {
-    if (this.isGetSalt) {
-      if (this._buf) {
-        chunk = Buffer.concat([this._buf, chunk]);
-        this._buf = null;
+    if (this._buf.length > 0) {
+      chunk = Buffer.concat([this._buf, chunk]);
+      this._buf = ZERO_BUF;
+    }
+
+    if (!this.isGotSalt) {
+      if (chunk.length < this.saltLen) throw new Error('invalid salt');
+      this.salt = chunk.slice(0, this.saltLen);
+      this.key = hkdf(this.mainkey, this.keyLen, { salt: this.salt, info: 'ss-subkey', hash: 'sha1' });
+      this.isGotSalt = true;
+      if (chunk.length === this.saltLen) return ZERO_BUF;
+      return this.update(chunk.slice(this.saltLen));
+    }
+
+    if (this._state === 1 || this._state === 2) {
+      this._state = 2;
+
+      // [encrypted payload length][length tag] = 2 + 16
+      if (chunk.length < 18) {
+        this._buf = chunk;
+        return ZERO_BUF;
       }
 
-      if (!this._waitAuthTag && this._chunkLen === 0) {
-        // [encrypted payload length][length tag] = 2 + 16
-        if (chunk.length < 18) {
-          this._buf = chunk;
-          return;
-        } else {
-          const cipher1 = crypto.createDecipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
-          cipher1.setAuthTag(chunk.slice(2, 18));
-          const lenBuf = cipher1.update(chunk.slice(0, 2));
-          cipher1.final();
-          this._chunkLen = lenBuf.readUInt16BE();
-          if (this._chunkLen > MAX_PAYLOAD) throw new Error('invalid payload len');
-          increase(this.nonce);
+      const cipher1 = crypto.createDecipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
+      cipher1.setAuthTag(chunk.slice(2, 18));
+      const lenBuf = cipher1.update(chunk.slice(0, 2));
+      cipher1.final();
+      increase(this.nonce);
+      this._payloadLen = lenBuf.readUInt16BE();
+      if (this._payloadLen > MAX_PAYLOAD) throw new Error('invalid payload len');
 
-          if (chunk.length === 18) return;
-          chunk = chunk.slice(18);
-        }
-      }
+      this._state = 3;
 
+      if (chunk.length === 18) return ZERO_BUF;
+      return this.update(chunk.slice(18));
+    }
+
+    if (this._state === 3) {
       if (!this._cipher2) {
         this._cipher2 = crypto.createDecipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
       }
 
-      let buf;
-      if (!this._waitAuthTag) {
-        const needReadChunkLen = this._chunkLen - this._readedChunkLen;
-        if (chunk.length < needReadChunkLen) {
-          buf = this._cipher2.update(chunk);
-          this._readedChunkLen += chunk.length;
+      if (chunk.length + this._handledPayloadLen < this._payloadLen) {
+        const transed = this._cipher2.update(chunk);
+        this._handledPayloadLen += chunk.length;
 
-          if (!this.isGotFirstPayload) {
-            this.firstPayload = Buffer.concat([this.firstPayload, buf]);
-            return;
-          }
-
-          return buf;
+        if (this.emitFirstPayload && !this._emitedFirstPayload) {
+          this._firstPayloadBuffer = Buffer.concat([this._firstPayloadBuffer, transed]);
+          return ZERO_BUF;
         }
 
-        buf = this._cipher2.update(chunk.slice(0, needReadChunkLen));
-        if (!this.isGotFirstPayload) this.firstPayload = Buffer.concat([this.firstPayload, buf]);
-        this._waitAuthTag = true;
-        chunk = chunk.slice(needReadChunkLen);
+        return transed;
       }
 
-      if (chunk.length < 16) {
-        this._buf = chunk;
-        if (!this.isGotFirstPayload) return;
-        return buf;
+      this._state = 4;
+      const leftLen = this._payloadLen - this._handledPayloadLen;
+      const transed = this._cipher2.update(chunk.slice(0, leftLen));
+      this._handledPayloadLen = this._payloadLen;
+
+      if (this.emitFirstPayload && !this._emitedFirstPayload) {
+        this._firstPayloadBuffer = Buffer.concat([this._firstPayloadBuffer, transed]);
+        if (leftLen === chunk.length) return ZERO_BUF;
+        return this.update(chunk.slice(leftLen));
       }
 
-      this._cipher2.setAuthTag(chunk.slice(0, 16));
-      this._cipher2.final();
-      increase(this.nonce);
-
-      if (!this.isGotFirstPayload) {
-        this.emit('firstPayload', this.firstPayload);
-        this.isGotFirstPayload = true;
-        this.firstPayload = null;
-        buf = null;
-      }
-
-      this._chunkLen = 0;
-      this._readedChunkLen = 0;
-      this._cipher2 = null;
-      this._waitAuthTag = false;
-
-      if (chunk.length === 16) return buf;
-
-      chunk = chunk.slice(16);
-      return Buffer.concat([buf || Buffer.allocUnsafe(0), this.update(chunk) || Buffer.allocUnsafe(0)]);
+      if (leftLen === chunk.length) return transed;
+      return Buffer.concat([transed, this.update(chunk.slice(leftLen))]);
     }
 
-    if (chunk.length < this.saltLen) throw new Error('invalid salt');
-    this.salt = chunk.slice(0, this.saltLen);
-    this.key = hkdf(this.mainkey, this.keyLen, { salt: this.salt, info: 'ss-subkey', hash: 'sha1' });
-    this.isGetSalt = true;
-    if (chunk.length > this.saltLen) return this.update(chunk.slice(this.saltLen));
+    // state 4
+    if (chunk.length < 16) {
+      this._buf = chunk;
+      return ZERO_BUF;
+    }
+    this._cipher2.setAuthTag(chunk.slice(0, 16));
+    this._cipher2.final();
+    increase(this.nonce);
+
+    this._cipher2 = null;
+    this._state = 1;
+    this._payloadLen = 0;
+    this._handledPayloadLen = 0;
+
+    if (this.emitFirstPayload && !this._emitedFirstPayload) {
+      this.emit('firstPayload', this._firstPayloadBuffer);
+      this._emitedFirstPayload = true;
+      this._firstPayloadBuffer = null;
+      if (chunk.length === 16) return ZERO_BUF;
+      return this.update(chunk.slice(16));
+    }
+
+    if (chunk.length === 16) return ZERO_BUF;
+    return this.update(chunk.slice(16));
   }
 
   _transform(chunk, encoding, callback) {
     try {
-      const buf = this.update(chunk);
-      callback(null, buf || Buffer.allocUnsafe(0));
-    } catch(err) {
+      const transed = this.update(chunk);
+      callback(null, transed);
+    } catch (err) {
       callback(err);
     }
   }
 
   _flush(callback) {
-    if (this._buf || this._chunkLen || this._cipher2 || this._waitAuthTag) {
+    if (this._state !== 1) {
       callback(new Error('invalid data'));
     } else {
-      callback(null, Buffer.allocUnsafe(0));
+      callback(null, ZERO_BUF);
     }
   }
 }
