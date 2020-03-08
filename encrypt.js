@@ -82,6 +82,8 @@ class Encryptor extends Transform {
 
       for (let i = 1; i <= times; i++) {
         const payloadLen = i === times ? (len - MAX_PAYLOAD * (i - 1)) : MAX_PAYLOAD;
+        const startIndex = (i - 1) * MAX_PAYLOAD;
+        const payload = chunk.slice(startIndex, startIndex + payloadLen);
 
         // [encrypted payload length][length tag][encrypted payload][payload tag]
         // 34 = 16 + 16 + 2
@@ -96,7 +98,7 @@ class Encryptor extends Transform {
         increase(this.nonce);
 
         const cipher2 = crypto.createCipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
-        cipher2.update(chunk).copy(buf, 18);
+        cipher2.update(payload).copy(buf, 18);
         cipher2.final();
         cipher2.getAuthTag().copy(buf, payloadLen + 18);
         increase(this.nonce);
@@ -104,7 +106,7 @@ class Encryptor extends Transform {
         bufs.push(buf);
       }
 
-      return times === 1 ? bufs[0] : Buffer.concat(bufs, len);
+      return times === 1 ? bufs[0] : Buffer.concat(bufs, len + 34 * times);
     }
 
     this.isPutSalt = true;
