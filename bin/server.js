@@ -22,6 +22,7 @@ class SocketHandler {
     this.proxy = null;
     this._beforeProxyBuffer = Buffer.allocUnsafe(0);
     this._proxyOk = false;
+    this._decryptorEnd = false;
 
     this.init();
   }
@@ -136,6 +137,7 @@ class SocketHandler {
       if (this._beforeProxyBuffer.length) proxy.write(this._beforeProxyBuffer);
       this._beforeProxyBuffer = null;
       this._proxyOk = true;
+      if (this._decryptorEnd) proxy.end();
     });
   }
 
@@ -147,6 +149,14 @@ class SocketHandler {
         this.proxy.write(chunk);
       } else {
         this._beforeProxyBuffer = Buffer.concat([this._beforeProxyBuffer, chunk]);
+      }
+    });
+
+    this.decryptor.on('end', () => {
+      if (this._proxyOk) {
+        this.proxy.end();
+      } else {
+        this._decryptorEnd = true;
       }
     });
 
