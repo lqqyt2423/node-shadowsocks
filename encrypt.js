@@ -231,13 +231,19 @@ class Decryptor extends Transform {
   }
 
   _transform(chunk, encoding, callback) {
-    const buf = this.update(chunk);
-    callback(null, buf || Buffer.allocUnsafe(0));
+    try {
+      const buf = this.update(chunk);
+      callback(null, buf || Buffer.allocUnsafe(0));
+    } catch(err) {
+      callback(err);
+    }
   }
 
-  _flush() {
+  _flush(callback) {
     if (this._buf || this._chunkLen || this._cipher2 || this._waitAuthTag) {
-      throw new Error('invalid data');
+      callback(new Error('invalid data'));
+    } else {
+      callback(null, Buffer.allocUnsafe(0));
     }
   }
 }
