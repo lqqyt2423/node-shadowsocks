@@ -154,7 +154,7 @@ class Decryptor extends Transform {
       this.key = hkdf(this.mainkey, this.keyLen, { salt: this.salt, info: 'ss-subkey', hash: 'sha1' });
       this.isGotSalt = true;
       if (chunk.length === this.saltLen) return;
-      return this.update(chunk.slice(this.saltLen));
+      chunk = chunk.slice(this.saltLen);
     }
 
     if (this._state === 1 || this._state === 2) {
@@ -177,7 +177,7 @@ class Decryptor extends Transform {
       this._state = 3;
 
       if (chunk.length === 18) return;
-      return this.update(chunk.slice(18));
+      chunk = chunk.slice(18);
     }
 
     if (this._state === 3) {
@@ -191,10 +191,10 @@ class Decryptor extends Transform {
 
         if (this.emitFirstPayload && !this._emitedFirstPayload) {
           this._firstPayloads.push(transed);
-          return;
+        } else {
+          this.push(transed);
         }
 
-        this.push(transed);
         return;
       }
 
@@ -205,13 +205,12 @@ class Decryptor extends Transform {
 
       if (this.emitFirstPayload && !this._emitedFirstPayload) {
         this._firstPayloads.push(transed);
-        if (leftLen === chunk.length) return;
-        return this.update(chunk.slice(leftLen));
+      } else {
+        this.push(transed);
       }
 
-      this.push(transed);
       if (leftLen === chunk.length) return;
-      return this.update(chunk.slice(leftLen));
+      chunk = chunk.slice(leftLen);
     }
 
     // state 4
@@ -232,8 +231,6 @@ class Decryptor extends Transform {
       this.emit('firstPayload', Buffer.concat(this._firstPayloads));
       this._emitedFirstPayload = true;
       this._firstPayloads = null;
-      if (chunk.length === 16) return;
-      return this.update(chunk.slice(16));
     }
 
     if (chunk.length === 16) return;
