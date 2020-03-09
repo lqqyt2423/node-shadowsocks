@@ -161,7 +161,7 @@ class Decryptor extends Transform {
       this.salt = chunk.slice(0, this.saltLen);
       this.key = hkdf(this.mainkey, this.keyLen, { salt: this.salt, info: 'ss-subkey', hash: 'sha1' });
       this.isGotSalt = true;
-      if (chunk.length === this.saltLen) return ZERO_BUF;
+      if (chunk.length === this.saltLen) return;
       return this.update(chunk.slice(this.saltLen));
     }
 
@@ -171,7 +171,7 @@ class Decryptor extends Transform {
       // [encrypted payload length][length tag] = 2 + 16
       if (chunk.length < 18) {
         this._buf = chunk;
-        return ZERO_BUF;
+        return;
       }
 
       const cipher1 = crypto.createDecipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
@@ -184,7 +184,7 @@ class Decryptor extends Transform {
 
       this._state = 3;
 
-      if (chunk.length === 18) return ZERO_BUF;
+      if (chunk.length === 18) return;
       return this.update(chunk.slice(18));
     }
 
@@ -199,10 +199,11 @@ class Decryptor extends Transform {
 
         if (this.emitFirstPayload && !this._emitedFirstPayload) {
           this._firstPayloadBuffer = Buffer.concat([this._firstPayloadBuffer, transed]);
-          return ZERO_BUF;
+          return;
         }
 
-        return transed;
+        this.push(transed);
+        return;
       }
 
       this._state = 4;
@@ -212,18 +213,19 @@ class Decryptor extends Transform {
 
       if (this.emitFirstPayload && !this._emitedFirstPayload) {
         this._firstPayloadBuffer = Buffer.concat([this._firstPayloadBuffer, transed]);
-        if (leftLen === chunk.length) return ZERO_BUF;
+        if (leftLen === chunk.length) return;
         return this.update(chunk.slice(leftLen));
       }
 
-      if (leftLen === chunk.length) return transed;
-      return Buffer.concat([transed, this.update(chunk.slice(leftLen))]);
+      this.push(transed);
+      if (leftLen === chunk.length) return;
+      return this.update(chunk.slice(leftLen));
     }
 
     // state 4
     if (chunk.length < 16) {
       this._buf = chunk;
-      return ZERO_BUF;
+      return;
     }
     this._cipher2.setAuthTag(chunk.slice(0, 16));
     this._cipher2.final();
@@ -238,18 +240,18 @@ class Decryptor extends Transform {
       this.emit('firstPayload', this._firstPayloadBuffer);
       this._emitedFirstPayload = true;
       this._firstPayloadBuffer = null;
-      if (chunk.length === 16) return ZERO_BUF;
+      if (chunk.length === 16) return;
       return this.update(chunk.slice(16));
     }
 
-    if (chunk.length === 16) return ZERO_BUF;
+    if (chunk.length === 16) return;
     return this.update(chunk.slice(16));
   }
 
   _transform(chunk, encoding, callback) {
     try {
-      const transed = this.update(chunk);
-      callback(null, transed);
+      this.update(chunk);
+      callback();
     } catch (err) {
       callback(err);
     }
@@ -259,7 +261,7 @@ class Decryptor extends Transform {
     if (this._state !== 1) {
       callback(new Error('invalid data'));
     } else {
-      callback(null, ZERO_BUF);
+      callback();
     }
   }
 }
