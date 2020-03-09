@@ -73,46 +73,40 @@ class Encryptor extends Transform {
   }
 
   update(chunk) {
-    if (this.isPutSalt) {
-      const len = chunk.length;
-      const times = Math.ceil(len / MAX_PAYLOAD);
-      const bufs = [];
-
-      for (let i = 1; i <= times; i++) {
-        const payloadLen = i === times ? (len - MAX_PAYLOAD * (i - 1)) : MAX_PAYLOAD;
-        const startIndex = (i - 1) * MAX_PAYLOAD;
-        const payload = chunk.slice(startIndex, startIndex + payloadLen);
-
-        // [encrypted payload length][length tag][encrypted payload][payload tag]
-        // 34 = 16 + 16 + 2
-        const buf = Buffer.allocUnsafe(payloadLen + 34);
-
-        const cipher1 = crypto.createCipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
-        const lenBuf = Buffer.allocUnsafe(2);
-        lenBuf.writeUInt16BE(payloadLen);
-        cipher1.update(lenBuf).copy(buf, 0);
-        cipher1.final();
-        cipher1.getAuthTag().copy(buf, 2);
-        increase(this.nonce);
-
-        const cipher2 = crypto.createCipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
-        cipher2.update(payload).copy(buf, 18);
-        cipher2.final();
-        cipher2.getAuthTag().copy(buf, payloadLen + 18);
-        increase(this.nonce);
-
-        bufs.push(buf);
-      }
-
-      return times === 1 ? bufs[0] : Buffer.concat(bufs, len + 34 * times);
+    if (!this.isPutSalt) {
+      this.push(this.salt);
+      this.isPutSalt = true;
     }
 
-    this.isPutSalt = true;
-    return Buffer.concat([this.salt, this.update(chunk)]);
+    const len = chunk.length;
+    const times = Math.ceil(len / MAX_PAYLOAD);
+
+    for (let i = 1; i <= times; i++) {
+      const startIndex = (i - 1) * MAX_PAYLOAD;
+      const payloadLen = i === times ? (len - startIndex) : MAX_PAYLOAD;
+      const payload = chunk.slice(startIndex, startIndex + payloadLen);
+
+      // [encrypted payload length][length tag][encrypted payload][payload tag]
+
+      const cipher1 = crypto.createCipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
+      const lenBuf = Buffer.allocUnsafe(2);
+      lenBuf.writeUInt16BE(payloadLen);
+      this.push(cipher1.update(lenBuf));
+      cipher1.final();
+      this.push(cipher1.getAuthTag());
+      increase(this.nonce);
+
+      const cipher2 = crypto.createCipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
+      this.push(cipher2.update(payload));
+      cipher2.final();
+      this.push(cipher2.getAuthTag());
+      increase(this.nonce);
+    }
   }
 
   _transform(chunk, encoding, callback) {
-    callback(null, this.update(chunk));
+    this.update(chunk);
+    callback();
   }
 }
 
