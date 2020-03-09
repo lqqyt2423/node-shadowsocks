@@ -20,7 +20,7 @@ class SocketHandler {
     this.decryptor = new Decryptor(this.cipherMethod, this.cipherPassword, { emitFirstPayload: true });
 
     this.proxy = null;
-    this._beforeProxyBuffer = Buffer.allocUnsafe(0);
+    this._beforeProxyBuffers = [];
     this._proxyOk = false;
     this._decryptorEnd = false;
 
@@ -134,9 +134,14 @@ class SocketHandler {
       proxy.pipe(encryptor).pipe(this.socket);
 
       if (firstProxyPayload) proxy.write(firstProxyPayload);
-      if (this._beforeProxyBuffer.length) proxy.write(this._beforeProxyBuffer);
-      this._beforeProxyBuffer = null;
+
+      if (this._beforeProxyBuffers.length) {
+        for (const buf of this._beforeProxyBuffers) proxy.write(buf);
+      }
+
+      this._beforeProxyBuffers = null;
       this._proxyOk = true;
+
       if (this._decryptorEnd) proxy.end();
     });
   }
@@ -148,7 +153,7 @@ class SocketHandler {
       if (this._proxyOk) {
         this.proxy.write(chunk);
       } else {
-        this._beforeProxyBuffer = Buffer.concat([this._beforeProxyBuffer, chunk]);
+        this._beforeProxyBuffers.push(chunk);
       }
     });
 
