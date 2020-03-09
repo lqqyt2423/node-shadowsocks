@@ -136,7 +136,7 @@ class Decryptor extends Transform {
     // will emit "firstPayload" event but not transform firstPayload
     this.emitFirstPayload = options.emitFirstPayload || false;
     this._emitedFirstPayload = false;
-    this._firstPayloadBuffer = this.emitFirstPayload ? ZERO_BUF : null;
+    this._firstPayloads = this.emitFirstPayload ? [] : null;
 
     // unhandled buffer last time
     this._buf = ZERO_BUF;
@@ -198,7 +198,7 @@ class Decryptor extends Transform {
         this._handledPayloadLen += chunk.length;
 
         if (this.emitFirstPayload && !this._emitedFirstPayload) {
-          this._firstPayloadBuffer = Buffer.concat([this._firstPayloadBuffer, transed]);
+          this._firstPayloads.push(transed);
           return;
         }
 
@@ -212,7 +212,7 @@ class Decryptor extends Transform {
       this._handledPayloadLen = this._payloadLen;
 
       if (this.emitFirstPayload && !this._emitedFirstPayload) {
-        this._firstPayloadBuffer = Buffer.concat([this._firstPayloadBuffer, transed]);
+        this._firstPayloads.push(transed);
         if (leftLen === chunk.length) return;
         return this.update(chunk.slice(leftLen));
       }
@@ -237,9 +237,9 @@ class Decryptor extends Transform {
     this._handledPayloadLen = 0;
 
     if (this.emitFirstPayload && !this._emitedFirstPayload) {
-      this.emit('firstPayload', this._firstPayloadBuffer);
+      this.emit('firstPayload', Buffer.concat(this._firstPayloads));
       this._emitedFirstPayload = true;
-      this._firstPayloadBuffer = null;
+      this._firstPayloads = null;
       if (chunk.length === 16) return;
       return this.update(chunk.slice(16));
     }
