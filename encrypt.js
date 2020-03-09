@@ -7,8 +7,6 @@ const hkdf = require('futoin-hkdf');
 // the maximum size of payload in bytes
 const MAX_PAYLOAD = 0x3fff;
 
-const ZERO_BUF = Buffer.allocUnsafe(0);
-
 // nonce size: 12, tag size: 16
 const cipherInfoMap = {
   'chacha20-poly1305': { keyLen: 32, saltLen: 32 },
@@ -139,7 +137,7 @@ class Decryptor extends Transform {
     this._firstPayloads = this.emitFirstPayload ? [] : null;
 
     // unhandled buffer last time
-    this._buf = ZERO_BUF;
+    this._buf = null;
     this._state = 1;
     this._payloadLen = 0;
     this._handledPayloadLen = 0;
@@ -151,9 +149,9 @@ class Decryptor extends Transform {
   // 1 - only begin, not have _buf
   // [encrypted payload length][length tag][encrypted payload][payload tag]
   update(chunk) {
-    if (this._buf.length > 0) {
+    if (this._buf) {
       chunk = Buffer.concat([this._buf, chunk]);
-      this._buf = ZERO_BUF;
+      this._buf = null;
     }
 
     if (!this.isGotSalt) {
