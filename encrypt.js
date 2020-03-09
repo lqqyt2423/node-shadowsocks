@@ -157,37 +157,53 @@ class Decryptor extends Transform {
       chunk = chunk.slice(this.saltLen);
     }
 
-    if (this._state === 1 || this._state === 2) {
-      this._state = 2;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (this._state === 1 || this._state === 2) {
+        this._state = 2;
 
-      // [encrypted payload length][length tag] = 2 + 16
-      if (chunk.length < 18) {
-        this._buf = chunk;
-        return;
+        // [encrypted payload length][length tag] = 2 + 16
+        if (chunk.length < 18) {
+          this._buf = chunk;
+          return;
+        }
+
+        const cipher1 = crypto.createDecipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
+        cipher1.setAuthTag(chunk.slice(2, 18));
+        const lenBuf = cipher1.update(chunk.slice(0, 2));
+        cipher1.final();
+        increase(this.nonce);
+        this._payloadLen = lenBuf.readUInt16BE();
+        if (this._payloadLen > MAX_PAYLOAD) throw new Error('invalid payload len');
+
+        this._state = 3;
+
+        if (chunk.length === 18) return;
+        chunk = chunk.slice(18);
       }
 
-      const cipher1 = crypto.createDecipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
-      cipher1.setAuthTag(chunk.slice(2, 18));
-      const lenBuf = cipher1.update(chunk.slice(0, 2));
-      cipher1.final();
-      increase(this.nonce);
-      this._payloadLen = lenBuf.readUInt16BE();
-      if (this._payloadLen > MAX_PAYLOAD) throw new Error('invalid payload len');
+      if (this._state === 3) {
+        if (!this._cipher2) {
+          this._cipher2 = crypto.createDecipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
+        }
 
-      this._state = 3;
+        if (chunk.length + this._handledPayloadLen < this._payloadLen) {
+          const transed = this._cipher2.update(chunk);
+          this._handledPayloadLen += chunk.length;
 
-      if (chunk.length === 18) return;
-      chunk = chunk.slice(18);
-    }
+          if (this.emitFirstPayload && !this._emitedFirstPayload) {
+            this._firstPayloads.push(transed);
+          } else {
+            this.push(transed);
+          }
 
-    if (this._state === 3) {
-      if (!this._cipher2) {
-        this._cipher2 = crypto.createDecipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
-      }
+          return;
+        }
 
-      if (chunk.length + this._handledPayloadLen < this._payloadLen) {
-        const transed = this._cipher2.update(chunk);
-        this._handledPayloadLen += chunk.length;
+        this._state = 4;
+        const leftLen = this._payloadLen - this._handledPayloadLen;
+        const transed = this._cipher2.update(chunk.slice(0, leftLen));
+        this._handledPayloadLen = this._payloadLen;
 
         if (this.emitFirstPayload && !this._emitedFirstPayload) {
           this._firstPayloads.push(transed);
@@ -195,46 +211,33 @@ class Decryptor extends Transform {
           this.push(transed);
         }
 
+        if (leftLen === chunk.length) return;
+        chunk = chunk.slice(leftLen);
+      }
+
+      // state 4
+      if (chunk.length < 16) {
+        this._buf = chunk;
         return;
       }
+      this._cipher2.setAuthTag(chunk.slice(0, 16));
+      this._cipher2.final();
+      increase(this.nonce);
 
-      this._state = 4;
-      const leftLen = this._payloadLen - this._handledPayloadLen;
-      const transed = this._cipher2.update(chunk.slice(0, leftLen));
-      this._handledPayloadLen = this._payloadLen;
+      this._cipher2 = null;
+      this._state = 1;
+      this._payloadLen = 0;
+      this._handledPayloadLen = 0;
 
       if (this.emitFirstPayload && !this._emitedFirstPayload) {
-        this._firstPayloads.push(transed);
-      } else {
-        this.push(transed);
+        this.emit('firstPayload', Buffer.concat(this._firstPayloads));
+        this._emitedFirstPayload = true;
+        this._firstPayloads = null;
       }
 
-      if (leftLen === chunk.length) return;
-      chunk = chunk.slice(leftLen);
+      if (chunk.length === 16) return;
+      chunk = chunk.slice(16);
     }
-
-    // state 4
-    if (chunk.length < 16) {
-      this._buf = chunk;
-      return;
-    }
-    this._cipher2.setAuthTag(chunk.slice(0, 16));
-    this._cipher2.final();
-    increase(this.nonce);
-
-    this._cipher2 = null;
-    this._state = 1;
-    this._payloadLen = 0;
-    this._handledPayloadLen = 0;
-
-    if (this.emitFirstPayload && !this._emitedFirstPayload) {
-      this.emit('firstPayload', Buffer.concat(this._firstPayloads));
-      this._emitedFirstPayload = true;
-      this._firstPayloads = null;
-    }
-
-    if (chunk.length === 16) return;
-    return this.update(chunk.slice(16));
   }
 
   _transform(chunk, encoding, callback) {
