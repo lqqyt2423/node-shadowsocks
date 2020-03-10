@@ -20,9 +20,6 @@ class SocketHandler {
     this.decryptor = new Decryptor(this.cipherMethod, this.cipherPassword, { emitFirstPayload: true });
 
     this.proxy = null;
-    this._beforeProxyBuffers = [];
-    this._proxyOk = false;
-    this._decryptorEnd = false;
 
     this.init();
   }
@@ -135,34 +132,22 @@ class SocketHandler {
 
       if (firstProxyPayload) proxy.write(firstProxyPayload);
 
-      if (this._beforeProxyBuffers.length) {
-        for (const buf of this._beforeProxyBuffers) proxy.write(buf);
-      }
-
-      this._beforeProxyBuffers = null;
-      this._proxyOk = true;
-
-      if (this._decryptorEnd) proxy.end();
+      this.decryptor.resume();
     });
   }
 
   async handle() {
-    this.decryptor.once('firstPayload', this.parseAddress.bind(this));
+    this.decryptor.once('firstPayload', (payload) => {
+      this.decryptor.pause();
+      this.parseAddress(payload);
+    });
 
     this.decryptor.on('data', chunk => {
-      if (this._proxyOk) {
-        this.proxy.write(chunk);
-      } else {
-        this._beforeProxyBuffers.push(chunk);
-      }
+      this.proxy.write(chunk);
     });
 
     this.decryptor.on('end', () => {
-      if (this._proxyOk) {
-        this.proxy.end();
-      } else {
-        this._decryptorEnd = true;
-      }
+      this.proxy.end();
     });
 
     this.socket.pipe(this.decryptor);
