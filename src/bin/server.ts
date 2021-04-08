@@ -1,17 +1,27 @@
 #!/usr/bin/env node
 
-'use strict';
+import net from 'net';
+import dns from 'dns';
+import util from 'util';
+import * as ipv6 from '../ipv6';
+import { config, IConfig, Method } from '../config';
+import { Encryptor, Decryptor } from '../encrypt';
+import { logger, Logger } from '../logger';
 
-const net = require('net');
-const dns = require('dns');
-const util = require('util');
-const ipv6 = require('../ipv6');
-const config = require('../config');
-const { Encryptor, Decryptor } = require('../encrypt');
-const logger = console;
+interface IOptions extends IConfig {
+  logger: Logger;
+}
 
 class SocketHandler {
-  constructor(socket, options = {}) {
+  private socket: net.Socket;
+  private logger: Logger;
+  private timeout: number;
+  private cipherMethod: Method;
+  private cipherPassword: string;
+  private decryptor: Decryptor;
+  private proxy: net.Socket;
+
+  constructor(socket: net.Socket, options: IOptions) {
     this.socket = socket;
     this.logger = options.logger || console;
     this.timeout = (options.timeout || 300) * 1000;
@@ -45,7 +55,7 @@ class SocketHandler {
     });
   }
 
-  async parseAddress(rawAddr) {
+  async parseAddress(rawAddr: Buffer) {
     const rawAddrLen = rawAddr.length;
     let dstHost, dstPort;
     let isDomain = false;
@@ -108,7 +118,7 @@ class SocketHandler {
     this.handleProxy(dstPort, dstHost, firstProxyPayload);
   }
 
-  handleProxy(port, host, firstProxyPayload) {
+  handleProxy(port: number, host: string, firstProxyPayload: Buffer) {
     // connect to real remote
     const proxy = this.proxy = net.createConnection(port, host);
     proxy.setTimeout(this.timeout);
@@ -137,7 +147,7 @@ class SocketHandler {
   }
 
   async handle() {
-    this.decryptor.once('firstPayload', (payload) => {
+    this.decryptor.once('firstPayload', (payload: Buffer) => {
       this.decryptor.pause();
       this.parseAddress(payload);
     });
@@ -156,8 +166,8 @@ class SocketHandler {
 
 net.createServer(socket => {
   new SocketHandler(socket, { logger, ...config }).handle();
-}).listen(config.server_port, config.server, () => {
-  logger.info('ss server listen at %s:%s', config.server, config.server_port);
+}).listen(config.server_port, () => {
+  logger.info('ss server listen at %s', config.server_port);
 });
 
 process.on('uncaughtException', err => {

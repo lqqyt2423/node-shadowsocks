@@ -1,9 +1,7 @@
-'use strict';
+import net from 'net';
+import assert from 'assert';
 
-const net = require('net');
-const assert = require('assert');
-
-function toBufArr(addr) {
+export function toBufArr(addr: string) {
   const bufArr = new Array(16).fill(0);
   if (!net.isIPv6(addr)) return bufArr;
 
@@ -66,7 +64,7 @@ function toBufArr(addr) {
   return bufArr;
 }
 
-function toStr(buf) {
+export function toStr(buf: Buffer) {
   assert(buf.length === 16);
 
   const dwArr = [];
@@ -76,6 +74,3 @@ function toStr(buf) {
   }
   return dwArr.join(':');
 }
-
-exports.toBufArr = toBufArr;
-exports.toStr = toStr;

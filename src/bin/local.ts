@@ -1,14 +1,25 @@
 #!/usr/bin/env node
 
-'use strict';
+import net from 'net';
+import { config, IConfig, Method } from '../config';
+import { logger, Logger } from '../logger';
+import { Encryptor, Decryptor } from '../encrypt';
+import { HTTPProxy } from '../http-proxy';
 
-const net = require('net');
-const config = require('../config');
-const { Encryptor, Decryptor } = require('../encrypt');
-const logger = console;
+interface IOptions extends IConfig {
+  logger: Logger;
+}
 
 class SocketHandler {
-  constructor(socket, options = {}) {
+  private socket: net.Socket;
+  private logger: Logger;
+  private timeout: number;
+  private server_port: number;
+  private server: string;
+  private cipherMethod: Method;
+  private cipherPassword: string;
+
+  constructor(socket: net.Socket, options: IOptions) {
     this.socket = socket;
     this.logger = options.logger || console;
     this.timeout = (options.timeout || 300) * 1000;
@@ -34,7 +45,7 @@ class SocketHandler {
     });
   }
 
-  consume() {
+  consume(): Promise<Buffer> {
     return new Promise(resolve => {
       this.socket.once('data', resolve);
     });
@@ -92,7 +103,7 @@ class SocketHandler {
   //   o  X'08' Address type not supported
   //   o  X'09' to X'FF' unassigned
 
-  reply(rep) {
+  reply(rep: number) {
     this.socket.write(Buffer.from([0x05, rep, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
   }
 
@@ -121,7 +132,7 @@ class SocketHandler {
 
     if (data[2] !== 0x00) this.logger.warn('RESERVED should be 0x00');
 
-    let rawAddr;
+    let rawAddr: Buffer;
     switch (data[3]) {
     case 0x01: // ipv4
       // 3(ver+cmd+rsv) + 1addrType + ipv4 + 2port
@@ -194,9 +205,15 @@ class SocketHandler {
 
 net.createServer(socket => {
   new SocketHandler(socket, { logger, ...config }).handle();
-}).listen(config.local_port, config.local_address, () => {
-  logger.info('ss local server listen at %s:%s', config.local_address, config.local_port);
+}).listen(config.local_port, () => {
+  logger.info('ss local server listen at %s', config.local_port);
 });
+
+new HTTPProxy({
+  port: config.local_http_port,
+  socksHost: config.local_address,
+  socksPort: config.local_port,
+}).start();
 
 process.on('uncaughtException', err => {
   logger.warn('uncaughtException');

@@ -5,5 +5,6 @@
   "local_address": "127.0.0.1",
   "password": "abc",
   "method": "aes-256-gcm",
-  "timeout": 600
+  "timeout": 600,
+  "local_http_port": 1090
 }

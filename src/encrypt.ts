@@ -1,29 +1,20 @@
-'use strict';
-
-const { Transform } = require('stream');
-const crypto = require('crypto');
-const hkdf = require('futoin-hkdf');
+import { Transform, TransformCallback } from 'stream';
+import crypto from 'crypto';
+import hkdf from 'futoin-hkdf';
+import { cipherInfoMap, Method } from './config';
 
 // the maximum size of payload in bytes
 const MAX_PAYLOAD = 0x3fff;
 
-// nonce size: 12, tag size: 16
-const cipherInfoMap = {
-  'chacha20-poly1305': { keyLen: 32, saltLen: 32 },
-  'aes-256-gcm': { keyLen: 32, saltLen: 32 },
-  'aes-192-gcm': { keyLen: 24, saltLen: 24 },
-  'aes-128-gcm': { keyLen: 16, saltLen: 16 },
-};
-
-function md5(b) {
+function md5(b: crypto.BinaryLike) {
   return crypto.createHash('md5').update(b).digest();
 }
 
 // copy from shadowsocks-go evpBytesToKey
-function _evpBytesToKey(password, keyLen) {
-  password = Buffer.from(password);
+function _evpBytesToKey(pwstr: string, keyLen: number) {
+  const password = Buffer.from(pwstr);
   const md5Len = 16;
-  const cnt = parseInt((keyLen - 1) / md5Len) + 1;
+  const cnt = Math.floor((keyLen - 1) / md5Len) + 1;
   const m = Buffer.allocUnsafe(cnt * md5Len);
   md5(password).copy(m);
 
@@ -41,8 +32,8 @@ function _evpBytesToKey(password, keyLen) {
   return m.slice(0, keyLen);
 }
 
-const keyCache = new Map();
-function evpBytesToKey(password, keyLen) {
+const keyCache = new Map<string, Buffer>();
+function evpBytesToKey(password: string, keyLen: number) {
   const cacheKey = password + keyLen;
   let value = keyCache.get(cacheKey);
   if (value) return value;
@@ -52,15 +43,21 @@ function evpBytesToKey(password, keyLen) {
 }
 
 // increment little-endian encoded unsigned integer b. Wrap around on overflow.
-function increase(nonce) {
+function increase(nonce: Buffer) {
   for (let i = 0; i < 12; i++) {
     nonce[i] += 1;
     if (nonce[i] !== 0) return;
   }
 }
 
-class Encryptor extends Transform {
-  constructor(method, password) {
+export class Encryptor extends Transform {
+  private method: Method;
+  private salt: Buffer;
+  private key: Buffer;
+  private nonce: Buffer;
+  private isPutSalt: boolean;
+
+  constructor(method: Method, password: string) {
     super();
 
     this.method = method;
@@ -72,7 +69,7 @@ class Encryptor extends Transform {
     this.isPutSalt = false;
   }
 
-  update(chunk) {
+  private update(chunk: Buffer) {
     if (!this.isPutSalt) {
       this.push(this.salt);
       this.isPutSalt = true;
@@ -88,7 +85,7 @@ class Encryptor extends Transform {
 
       // [encrypted payload length][length tag][encrypted payload][payload tag]
 
-      const cipher1 = crypto.createCipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
+      const cipher1 = crypto.createCipheriv(this.method as crypto.CipherGCMTypes, this.key, this.nonce, { authTagLength: 16 });
       const lenBuf = Buffer.allocUnsafe(2);
       lenBuf.writeUInt16BE(payloadLen);
       this.push(cipher1.update(lenBuf));
@@ -96,7 +93,7 @@ class Encryptor extends Transform {
       this.push(cipher1.getAuthTag());
       increase(this.nonce);
 
-      const cipher2 = crypto.createCipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
+      const cipher2 = crypto.createCipheriv(this.method as crypto.CipherGCMTypes, this.key, this.nonce, { authTagLength: 16 });
       this.push(cipher2.update(payload));
       cipher2.final();
       this.push(cipher2.getAuthTag());
@@ -104,14 +101,31 @@ class Encryptor extends Transform {
     }
   }
 
-  _transform(chunk, encoding, callback) {
+  _transform(chunk: any, encoding: BufferEncoding, callback: TransformCallback) {
     this.update(chunk);
     callback();
   }
 }
 
-class Decryptor extends Transform {
-  constructor(method, password, options = {}) {
+export class Decryptor extends Transform {
+  private method: Method;
+  private keyLen: number;
+  private saltLen: number;
+  private mainkey: Buffer;
+  private isGotSalt: boolean;
+  private nonce: Buffer;
+  private salt: Buffer;
+  private key: Buffer;
+  private emitFirstPayload: boolean;
+  private _emitedFirstPayload: boolean;
+  private _firstPayloads: Buffer[];
+  private _buf: Buffer;
+  private _state: number;
+  private _payloadLen: number;
+  private _handledPayloadLen: number;
+  private _cipher2: crypto.DecipherGCM;
+
+  constructor(method: Method, password: string, options?: { emitFirstPayload: boolean }) {
     super();
 
     this.method = method;
@@ -142,7 +156,7 @@ class Decryptor extends Transform {
   // 1                                    2                  3            4
   // 1 - only begin, not have _buf
   // [encrypted payload length][length tag][encrypted payload][payload tag]
-  update(chunk) {
+  update(chunk: Buffer) {
     if (this._buf) {
       chunk = Buffer.concat([this._buf, chunk]);
       this._buf = null;
@@ -168,7 +182,7 @@ class Decryptor extends Transform {
           return;
         }
 
-        const cipher1 = crypto.createDecipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
+        const cipher1 = crypto.createDecipheriv(this.method as crypto.CipherGCMTypes, this.key, this.nonce, { authTagLength: 16 });
         cipher1.setAuthTag(chunk.slice(2, 18));
         const lenBuf = cipher1.update(chunk.slice(0, 2));
         cipher1.final();
@@ -184,7 +198,7 @@ class Decryptor extends Transform {
 
       if (this._state === 3) {
         if (!this._cipher2) {
-          this._cipher2 = crypto.createDecipheriv(this.method, this.key, this.nonce, { authTagLength: 16 });
+          this._cipher2 = crypto.createDecipheriv(this.method as crypto.CipherGCMTypes, this.key, this.nonce, { authTagLength: 16 });
         }
 
         if (chunk.length + this._handledPayloadLen < this._payloadLen) {
@@ -240,7 +254,7 @@ class Decryptor extends Transform {
     }
   }
 
-  _transform(chunk, encoding, callback) {
+  _transform(chunk: any, encoding: BufferEncoding, callback: TransformCallback) {
     try {
       this.update(chunk);
       callback();
@@ -249,7 +263,7 @@ class Decryptor extends Transform {
     }
   }
 
-  _flush(callback) {
+  _flush(callback: TransformCallback) {
     if (this._state !== 1) {
       callback(new Error('invalid data'));
     } else {
@@ -257,7 +271,3 @@ class Decryptor extends Transform {
     }
   }
 }
-
-exports.cipherInfoMap = cipherInfoMap;
-exports.Encryptor = Encryptor;
-exports.Decryptor = Decryptor;
