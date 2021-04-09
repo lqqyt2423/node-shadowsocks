@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 import net from 'net';
-import { config, IConfig, Method } from '../config';
-import { logger, Logger } from '../logger';
-import { Encryptor, Decryptor } from '../encrypt';
-import { HTTPProxy } from '../http-proxy';
+import { config, IConfig, Method } from './config';
+import { logger, Logger } from './logger';
+import { Encryptor, Decryptor } from './encrypt';
+import { HTTPProxy } from './http-proxy';
 
 interface IOptions extends IConfig {
   logger: Logger;

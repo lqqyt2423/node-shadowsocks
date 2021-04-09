@@ -2,13 +2,11 @@
   "name": "node-shadowsocks",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "src/ss-local.ts",
   "scripts": {
+    "ss-local": "node dist/ss-local.js",
+    "ss-server": "node dist/ss-server.js",
     "tsc": "tsc"
-  },
-  "bin": {
-    "ss-local": "./dist/bin/local.js",
-    "ss-server": "./dist/bin/server.js"
   },
   "devDependencies": {
     "@types/node": "^14.14.37",

@@ -3,10 +3,10 @@
 import net from 'net';
 import dns from 'dns';
 import util from 'util';
-import * as ipv6 from '../ipv6';
-import { config, IConfig, Method } from '../config';
-import { Encryptor, Decryptor } from '../encrypt';
-import { logger, Logger } from '../logger';
+import * as ipv6 from './ipv6';
+import { config, IConfig, Method } from './config';
+import { Encryptor, Decryptor } from './encrypt';
+import { logger, Logger } from './logger';
 
 interface IOptions extends IConfig {
   logger: Logger;
