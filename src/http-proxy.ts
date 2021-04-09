@@ -103,6 +103,12 @@ export class HTTPProxy {
         proxyRes.pipe(res);
       });
 
+      proxyClient.on('error', err => {
+        logger.error('proxyClient error', err);
+        if (!res.headersSent) res.writeHead(502);
+        if (!res.writableEnded) res.end();
+      });
+
       req.pipe(proxyClient);
     });
 
