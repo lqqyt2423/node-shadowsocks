@@ -140,7 +140,7 @@ export class Decryptor extends Transform {
     this.key = null;
 
     // will emit "firstPayload" event but not transform firstPayload
-    this.emitFirstPayload = options.emitFirstPayload || false;
+    this.emitFirstPayload = options?.emitFirstPayload || false;
     this._emitedFirstPayload = false;
     this._firstPayloads = this.emitFirstPayload ? [] : null;
 
