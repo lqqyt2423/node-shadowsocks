@@ -6,7 +6,9 @@ import util from 'util';
 import * as ipv6 from './ipv6';
 import { config, IConfig, Method } from './config';
 import { Encryptor, Decryptor } from './encrypt';
-import { logger, Logger } from './logger';
+import { Logger } from './logger';
+
+const logger = new Logger('ss-server');
 
 interface IOptions extends IConfig {
   logger: Logger;
@@ -23,7 +25,7 @@ class SocketHandler {
 
   constructor(socket: net.Socket, options: IOptions) {
     this.socket = socket;
-    this.logger = options.logger || console;
+    this.logger = options.logger || logger;
     this.timeout = (options.timeout || 300) * 1000;
     this.cipherMethod = options.method;
     this.cipherPassword = options.password;

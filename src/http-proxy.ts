@@ -1,7 +1,9 @@
 import net from 'net';
 import { URL } from 'url';
 import http from 'http';
-import { logger } from './logger';
+import { Logger } from './logger';
+
+const logger = new Logger('http-proxy');
 
 class Socks5Client {
   private socksHost: string;

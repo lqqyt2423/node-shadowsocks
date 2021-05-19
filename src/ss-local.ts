@@ -2,9 +2,11 @@
 
 import net from 'net';
 import { config, IConfig, Method } from './config';
-import { logger, Logger } from './logger';
+import { Logger } from './logger';
 import { Encryptor, Decryptor } from './encrypt';
 import { HTTPProxy } from './http-proxy';
+
+const logger = new Logger('ss-local');
 
 interface IOptions extends IConfig {
   logger: Logger;
@@ -21,7 +23,7 @@ class SocketHandler {
 
   constructor(socket: net.Socket, options: IOptions) {
     this.socket = socket;
-    this.logger = options.logger || console;
+    this.logger = options.logger || logger;
     this.timeout = (options.timeout || 300) * 1000;
     this.server_port = options.server_port;
     this.server = options.server;
