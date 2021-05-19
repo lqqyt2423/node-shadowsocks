@@ -12,8 +12,13 @@ interface IOptions extends IConfig {
   logger: Logger;
 }
 
+const remoteAddr = (socket: net.Socket) => {
+  return `${socket.remoteAddress || ''}:${socket.remotePort || ''}`;
+};
+
 class SocketHandler {
   private socket: net.Socket;
+  private proxySocket: net.Socket | null;
   private logger: Logger;
   private timeout: number;
   private server_port: number;
@@ -23,6 +28,7 @@ class SocketHandler {
 
   constructor(socket: net.Socket, options: IOptions) {
     this.socket = socket;
+    this.proxySocket = null;
     this.logger = options.logger || logger;
     this.timeout = (options.timeout || 300) * 1000;
     this.server_port = options.server_port;
@@ -34,16 +40,22 @@ class SocketHandler {
   }
 
   init() {
+    this.socket.setNoDelay();
     this.socket.setTimeout(this.timeout);
-    this.socket.on('error', err => {
-      this.logger.warn('socket error');
-      this.logger.error(err);
-      if (!this.socket.destroyed) this.socket.destroy();
-    });
 
     this.socket.on('timeout', () => {
-      this.logger.warn('socket timeout');
-      this.socket.end();
+      this.logger.warn('socket timeout', remoteAddr(this.socket));
+      this.socket.destroy();
+    });
+
+    this.socket.on('error', err => {
+      logger.error('socket error:', remoteAddr(this.socket), err);
+    });
+
+    this.socket.on('close', () => {
+      if (this.proxySocket && !this.proxySocket.destroyed) {
+        this.proxySocket.destroy();
+      }
     });
   }
 
@@ -64,7 +76,7 @@ class SocketHandler {
     const data = await this.consume();
     if (data[0] !== 0x05) {
       this.logger.error('Unsupported SOCKS version: %d', data[0]);
-      this.socket.end();
+      this.socket.destroy();
       return true;
     }
 
@@ -121,7 +133,7 @@ class SocketHandler {
     const data = await this.consume();
     if (data[0] != 0x05) {
       this.logger.error('Unsupported SOCKS version: %d', data[0]);
-      return this.socket.end();
+      return this.socket.destroy();
     }
 
     // o  CONNECT X'01'
@@ -129,7 +141,7 @@ class SocketHandler {
     // o  UDP ASSOCIATE X'03'
     if (data[1] !== 0x01) {
       this.reply(0x07);
-      return this.socket.end();
+      return this.socket.destroy();
     }
 
     if (data[2] !== 0x00) this.logger.warn('RESERVED should be 0x00');
@@ -154,32 +166,32 @@ class SocketHandler {
     default:
       this.logger.error(`ATYP ${data[3]} not support`);
       this.reply(0x08);
-      return this.socket.end();
+      return this.socket.destroy();
     }
 
-    let replyed = false;
     // connect to ss-server
-    const proxy = net.createConnection(this.server_port, this.server);
-    proxy.setTimeout(this.timeout);
-
-    proxy.on('error', (err) => {
-      this.logger.warn('proxy error');
-      this.logger.error(err);
-      if (!replyed) this.reply(0x05);
-      if (!proxy.destroyed) proxy.destroy();
-      this.socket.end();
-    });
+    const proxy = this.proxySocket = net.createConnection(this.server_port, this.server);
 
     proxy.on('timeout', () => {
-      this.logger.warn('proxy timeout');
-      if (!replyed) this.reply(0x05);
-      proxy.end();
-      this.socket.end();
+      this.logger.warn('proxy socket timeout', remoteAddr(this.socket));
+      proxy.destroy();
     });
 
-    proxy.once('connect', () => {
+    proxy.on('error', (err) => {
+      this.logger.error('proxy socket error:', remoteAddr(this.socket), err);
+    });
+
+    proxy.on('close', () => {
+      if (!this.socket.destroyed) {
+        this.socket.destroy();
+      }
+    });
+
+    proxy.on('connect', () => {
+      proxy.setNoDelay();
+      proxy.setTimeout(this.timeout);
+
       this.reply(0x00);
-      replyed = true;
 
       const encryptor = new Encryptor(this.cipherMethod, this.cipherPassword);
       encryptor.pipe(proxy);
@@ -188,10 +200,8 @@ class SocketHandler {
 
       const decryptor = new Decryptor(this.cipherMethod, this.cipherPassword);
       decryptor.on('error', (err) => {
-        this.logger.warn('decryptor error');
-        this.logger.error(err);
-        this.socket.end();
-        proxy.end();
+        this.logger.error('decryptor error:', remoteAddr(this.socket), err);
+        proxy.destroy();
       });
       proxy.pipe(decryptor).pipe(this.socket);
     });
@@ -205,9 +215,15 @@ class SocketHandler {
   }
 }
 
-net.createServer(socket => {
+const ssLocalServer = net.createServer(socket => {
   new SocketHandler(socket, { logger, ...config }).handle();
-}).listen(config.local_port, () => {
+});
+
+ssLocalServer.on('error', err => {
+  logger.info('ss local server error:', err);
+});
+
+ssLocalServer.listen(config.local_port, () => {
   logger.info('ss local server listen at %s', config.local_port);
 });
 
@@ -216,13 +232,3 @@ new HTTPProxy({
   socksHost: config.local_address,
   socksPort: config.local_port,
 }).start();
-
-process.on('uncaughtException', err => {
-  logger.warn('uncaughtException');
-  logger.error(err);
-});
-
-process.on('unhandledRejection', err => {
-  logger.warn('unhandledRejection');
-  logger.error(err);
-});

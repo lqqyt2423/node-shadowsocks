@@ -168,6 +168,10 @@ export class HTTPProxy {
   }
 
   public start() {
+    this.server.on('error', err => {
+      logger.info('http proxy server error:', err);
+    });
+
     this.server.listen(this.port, () => {
       logger.info('http proxy listen at %s', this.port);
     });
