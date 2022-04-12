@@ -1,6 +1,6 @@
 import { Transform, TransformCallback } from 'stream';
-import crypto from 'crypto';
-import hkdf from 'futoin-hkdf';
+import * as crypto from 'crypto';
+import * as hkdf from 'futoin-hkdf';
 import { cipherInfoMap, Method } from './config';
 
 // the maximum size of payload in bytes
@@ -80,7 +80,7 @@ export class Encryptor extends Transform {
 
     for (let i = 1; i <= times; i++) {
       const startIndex = (i - 1) * MAX_PAYLOAD;
-      const payloadLen = i === times ? (len - startIndex) : MAX_PAYLOAD;
+      const payloadLen = i === times ? len - startIndex : MAX_PAYLOAD;
       const payload = chunk.slice(startIndex, startIndex + payloadLen);
 
       // [encrypted payload length][length tag][encrypted payload][payload tag]

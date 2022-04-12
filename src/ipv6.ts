@@ -1,5 +1,5 @@
-import net from 'net';
-import assert from 'assert';
+import * as net from 'net';
+import * as assert from 'assert';
 
 export function toBufArr(addr: string) {
   const bufArr = new Array(16).fill(0);
@@ -34,9 +34,7 @@ export function toBufArr(addr: string) {
         bufArr[index++] = byte1;
         groupStr = '';
       }
-    }
-
-    else {
+    } else {
       groupStr += addr[i];
     }
   }

@@ -9,8 +9,7 @@ export function dateFormat(date: Date): string {
   return `${year}-${month}-${day} ${hour}:${minute}:${second},${ms}`;
 }
 
-
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export class Logger {
   private static levelEnum = {
@@ -18,11 +17,11 @@ export class Logger {
     info: 1,
     warn: 2,
     error: 3,
-  }
+  };
 
-  private prefix: string
-  public silent = false
-  public level: LogLevel = 'debug'
+  private prefix: string;
+  public silent = false;
+  public level: LogLevel = 'debug';
 
   constructor(prefix: string) {
     this.prefix = prefix;

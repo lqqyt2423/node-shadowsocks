@@ -1,6 +1,6 @@
-import net from 'net';
+import * as net from 'net';
 import { URL } from 'url';
-import http from 'http';
+import * as http from 'http';
 import { Logger } from './logger';
 
 const logger = new Logger('http-proxy');
@@ -21,7 +21,7 @@ class Socks5Client {
       socket.once('error', reject);
 
       const consume: () => Promise<Buffer> = () => {
-        return new Promise(cb => {
+        return new Promise((cb) => {
           socket.once('data', cb);
         });
       };
@@ -37,11 +37,7 @@ class Socks5Client {
 
         const portBuf = Buffer.allocUnsafe(2);
         portBuf.writeInt16BE(Number(port));
-        const data = Buffer.concat([
-          Buffer.from([0x05, 0x01, 0x00, 0x03, Buffer.byteLength(host)]),
-          Buffer.from(host),
-          portBuf,
-        ]);
+        const data = Buffer.concat([Buffer.from([0x05, 0x01, 0x00, 0x03, Buffer.byteLength(host)]), Buffer.from(host), portBuf]);
         socket.write(data);
 
         const res2 = await consume();
@@ -77,11 +73,12 @@ class Socks5Agent extends http.Agent {
       return null;
     }
 
-    this.socks5Client.connect(options.hostname, Number(options.port))
-      .then(socket => {
+    this.socks5Client
+      .connect(options.hostname, Number(options.port))
+      .then((socket) => {
         oncreate(null, socket);
       })
-      .catch(err => {
+      .catch((err) => {
         oncreate(err, null);
       });
 
@@ -95,11 +92,7 @@ export class HTTPProxy {
   private agent: http.Agent;
   private socks5Client: Socks5Client;
 
-  constructor(options: {
-    port: number;
-    socksHost: string;
-    socksPort: number;
-  }) {
+  constructor(options: { port: number; socksHost: string; socksPort: number }) {
     this.port = options.port;
     this.agent = new Socks5Agent({ socksHost: options.socksHost, socksPort: options.socksPort });
     this.socks5Client = new Socks5Client(options.socksHost, options.socksPort);
@@ -113,19 +106,22 @@ export class HTTPProxy {
       logger.info('http %s %s', req.method, req.url);
 
       const url = new URL(req.url);
-      const proxyClient = http.request({
-        agent: this.agent,
-        hostname: url.hostname,
-        port: url.port || 80,
-        method: req.method,
-        path: url.pathname + url.search,
-        headers: req.headers,
-      }, (proxyRes) => {
-        res.writeHead(proxyRes.statusCode, proxyRes.headers);
-        proxyRes.pipe(res);
-      });
+      const proxyClient = http.request(
+        {
+          agent: this.agent,
+          hostname: url.hostname,
+          port: url.port || 80,
+          method: req.method,
+          path: url.pathname + url.search,
+          headers: req.headers,
+        },
+        (proxyRes) => {
+          res.writeHead(proxyRes.statusCode, proxyRes.headers);
+          proxyRes.pipe(res);
+        }
+      );
 
-      proxyClient.on('error', err => {
+      proxyClient.on('error', (err) => {
         logger.error('proxyClient error', err);
         if (!res.headersSent) res.writeHead(502);
         if (!res.writableEnded) res.end();
@@ -149,11 +145,11 @@ export class HTTPProxy {
         return;
       }
 
-      socket.on('error', err => {
+      socket.on('error', (err) => {
         logger.error('socket error', err);
       });
 
-      clientSocket.on('error', err => {
+      clientSocket.on('error', (err) => {
         logger.error('clientSocket error', err);
       });
 
@@ -168,7 +164,7 @@ export class HTTPProxy {
   }
 
   public start() {
-    this.server.on('error', err => {
+    this.server.on('error', (err) => {
       logger.info('http proxy server error:', err);
     });
 

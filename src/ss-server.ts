@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import net from 'net';
-import dns from 'dns';
-import util from 'util';
+import * as net from 'net';
+import * as dns from 'dns';
+import * as util from 'util';
 import * as ipv6 from './ipv6';
 import { config, IConfig, Method } from './config';
 import { Encryptor, Decryptor } from './encrypt';
@@ -38,7 +38,7 @@ class SocketHandler {
 
   init() {
     this.socket.setTimeout(this.timeout);
-    this.socket.on('error', err => {
+    this.socket.on('error', (err) => {
       this.logger.warn('socket error');
       this.logger.error(err);
       if (!this.socket.destroyed) this.socket.destroy();
@@ -62,7 +62,8 @@ class SocketHandler {
     let dstHost, dstPort;
     let isDomain = false;
     let remainDataIndex = -1;
-    if (rawAddr[0] === 0x01) { // ipv4
+    if (rawAddr[0] === 0x01) {
+      // ipv4
       if (rawAddr.length < 7) {
         this.logger.warn('invalid ipv4 data');
         this.socket.end();
@@ -71,8 +72,8 @@ class SocketHandler {
       dstHost = `${rawAddr[1]}.${rawAddr[2]}.${rawAddr[3]}.${rawAddr[4]}`;
       dstPort = (rawAddr[5] << 8) | rawAddr[6];
       if (rawAddrLen > 7) remainDataIndex = 7;
-    }
-    else if (rawAddr[0] === 0x03) { // domain
+    } else if (rawAddr[0] === 0x03) {
+      // domain
       const domainLen = rawAddr[1];
       if (rawAddrLen < 4 + domainLen) {
         this.logger.warn('invalid domain data');
@@ -84,8 +85,8 @@ class SocketHandler {
       this.logger.info('domain:', dstHost);
       dstPort = (rawAddr[2 + domainLen] << 8) | rawAddr[3 + domainLen];
       if (rawAddrLen > 4 + domainLen) remainDataIndex = 4 + domainLen;
-    }
-    else if (rawAddr[0] === 0x04) { // ipv6
+    } else if (rawAddr[0] === 0x04) {
+      // ipv6
       if (rawAddrLen < 19) {
         this.logger.warn('invalid ipv6 data');
         this.socket.end();
@@ -94,8 +95,7 @@ class SocketHandler {
       dstHost = ipv6.toStr(rawAddr.slice(1, 17));
       dstPort = (rawAddr[17] << 8) | rawAddr[18];
       if (rawAddrLen > 19) remainDataIndex = 19;
-    }
-    else {
+    } else {
       this.logger.warn(`ATYP ${rawAddr[0]} not support`);
       this.socket.end();
       return;
@@ -122,7 +122,7 @@ class SocketHandler {
 
   handleProxy(port: number, host: string, firstProxyPayload: Buffer) {
     // connect to real remote
-    const proxy = this.proxy = net.createConnection(port, host);
+    const proxy = (this.proxy = net.createConnection(port, host));
     proxy.setTimeout(this.timeout);
 
     proxy.on('error', (err) => {
@@ -154,7 +154,7 @@ class SocketHandler {
       this.parseAddress(payload);
     });
 
-    this.decryptor.on('data', chunk => {
+    this.decryptor.on('data', (chunk) => {
       this.proxy.write(chunk);
     });
 
@@ -166,18 +166,20 @@ class SocketHandler {
   }
 }
 
-net.createServer(socket => {
-  new SocketHandler(socket, { logger, ...config }).handle();
-}).listen(config.server_port, () => {
-  logger.info('ss server listen at %s', config.server_port);
-});
+net
+  .createServer((socket) => {
+    new SocketHandler(socket, { logger, ...config }).handle();
+  })
+  .listen(config.server_port, () => {
+    logger.info('ss server listen at %s', config.server_port);
+  });
 
-process.on('uncaughtException', err => {
+process.on('uncaughtException', (err) => {
   logger.warn('uncaughtException');
   logger.error(err);
 });
 
-process.on('unhandledRejection', err => {
+process.on('unhandledRejection', (err) => {
   logger.warn('unhandledRejection');
   logger.error(err);
 });

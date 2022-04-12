@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import net from 'net';
+import * as net from 'net';
 import { config, IConfig, Method } from './config';
 import { Logger } from './logger';
 import { Encryptor, Decryptor } from './encrypt';
@@ -48,7 +48,7 @@ class SocketHandler {
       this.socket.destroy();
     });
 
-    this.socket.on('error', err => {
+    this.socket.on('error', (err) => {
       logger.error('socket error:', remoteAddr(this.socket), err);
     });
 
@@ -60,11 +60,10 @@ class SocketHandler {
   }
 
   consume(): Promise<Buffer> {
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       this.socket.once('data', resolve);
     });
   }
-
 
   //   +----+----------+----------+
   //   |VER | NMETHODS | METHODS  |
@@ -91,14 +90,12 @@ class SocketHandler {
     // only support 0x00
     if (methods.includes(0x00)) {
       this.socket.write(Buffer.from([0x05, 0x00]));
-    }
-    else {
+    } else {
       this.logger.error('auth methods not support');
       this.socket.end(Buffer.from([0x05, 0xff]));
       return true;
     }
   }
-
 
   //   +----+-----+-------+------+----------+----------+
   //   |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
@@ -148,29 +145,29 @@ class SocketHandler {
 
     let rawAddr: Buffer;
     switch (data[3]) {
-    case 0x01: // ipv4
-      // 3(ver+cmd+rsv) + 1addrType + ipv4 + 2port
-      rawAddr = data.slice(3, 10);
-      break;
-    case 0x03: // domain
-    {
-      const domainLen = data[4];
-      // 3 + 1addrType + 1addrLen + 2port, plus addrLen
-      rawAddr = data.slice(3, 7 + domainLen);
-      break;
-    }
-    case 0x04: // ipv6
-      // 3(ver+cmd+rsv) + 1addrType + ipv6 + 2port
-      rawAddr = data.slice(3, 22);
-      break;
-    default:
-      this.logger.error(`ATYP ${data[3]} not support`);
-      this.reply(0x08);
-      return this.socket.destroy();
+      case 0x01: // ipv4
+        // 3(ver+cmd+rsv) + 1addrType + ipv4 + 2port
+        rawAddr = data.slice(3, 10);
+        break;
+      case 0x03: {
+        // domain
+        const domainLen = data[4];
+        // 3 + 1addrType + 1addrLen + 2port, plus addrLen
+        rawAddr = data.slice(3, 7 + domainLen);
+        break;
+      }
+      case 0x04: // ipv6
+        // 3(ver+cmd+rsv) + 1addrType + ipv6 + 2port
+        rawAddr = data.slice(3, 22);
+        break;
+      default:
+        this.logger.error(`ATYP ${data[3]} not support`);
+        this.reply(0x08);
+        return this.socket.destroy();
     }
 
     // connect to ss-server
-    const proxy = this.proxySocket = net.createConnection(this.server_port, this.server);
+    const proxy = (this.proxySocket = net.createConnection(this.server_port, this.server));
 
     proxy.on('timeout', () => {
       this.logger.warn('proxy socket timeout', remoteAddr(this.socket));
@@ -215,11 +212,11 @@ class SocketHandler {
   }
 }
 
-const ssLocalServer = net.createServer(socket => {
+const ssLocalServer = net.createServer((socket) => {
   new SocketHandler(socket, { logger, ...config }).handle();
 });
 
-ssLocalServer.on('error', err => {
+ssLocalServer.on('error', (err) => {
   logger.info('ss local server error:', err);
 });
 
