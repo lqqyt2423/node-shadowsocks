@@ -17,6 +17,7 @@ export interface IConfig {
   method: Method;
   timeout: number;
   local_http_port: number;
+  tunnel: 'tcp' | 'websocket';
 }
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires

@@ -5,6 +5,7 @@ import { config, IConfig, Method } from './config';
 import { Logger } from './logger';
 import { Encryptor, Decryptor } from './encrypt';
 import { HTTPProxy } from './http-proxy';
+import * as stream from 'stream';
 
 const logger = new Logger('ss-local');
 
@@ -18,7 +19,7 @@ const remoteAddr = (socket: net.Socket) => {
 
 class SocketHandler {
   private socket: net.Socket;
-  private proxySocket: net.Socket | null;
+  private tunnel: stream.Duplex;
   private logger: Logger;
   private timeout: number;
   private server_port: number;
@@ -28,7 +29,7 @@ class SocketHandler {
 
   constructor(socket: net.Socket, options: IOptions) {
     this.socket = socket;
-    this.proxySocket = null;
+    this.tunnel = null;
     this.logger = options.logger || logger;
     this.timeout = (options.timeout || 300) * 1000;
     this.server_port = options.server_port;
@@ -53,8 +54,8 @@ class SocketHandler {
     });
 
     this.socket.on('close', () => {
-      if (this.proxySocket && !this.proxySocket.destroyed) {
-        this.proxySocket.destroy();
+      if (this.tunnel && !this.tunnel.destroyed) {
+        this.tunnel.destroy();
       }
     });
   }
@@ -166,42 +167,20 @@ class SocketHandler {
         return this.socket.destroy();
     }
 
-    // connect to ss-server
-    const proxy = (this.proxySocket = net.createConnection(this.server_port, this.server));
+    this.tunnel = await this.initTcpTunnel();
+    this.reply(0x00);
 
-    proxy.on('timeout', () => {
-      this.logger.warn('proxy socket timeout', remoteAddr(this.socket));
-      proxy.destroy();
+    const encryptor = new Encryptor(this.cipherMethod, this.cipherPassword);
+    encryptor.pipe(this.tunnel);
+    encryptor.write(rawAddr);
+    this.socket.pipe(encryptor);
+
+    const decryptor = new Decryptor(this.cipherMethod, this.cipherPassword);
+    decryptor.on('error', (err) => {
+      this.logger.error('decryptor error:', remoteAddr(this.socket), err);
+      this.tunnel.destroy();
     });
-
-    proxy.on('error', (err) => {
-      this.logger.error('proxy socket error:', remoteAddr(this.socket), err);
-    });
-
-    proxy.on('close', () => {
-      if (!this.socket.destroyed) {
-        this.socket.destroy();
-      }
-    });
-
-    proxy.on('connect', () => {
-      proxy.setNoDelay();
-      proxy.setTimeout(this.timeout);
-
-      this.reply(0x00);
-
-      const encryptor = new Encryptor(this.cipherMethod, this.cipherPassword);
-      encryptor.pipe(proxy);
-      encryptor.write(rawAddr);
-      this.socket.pipe(encryptor);
-
-      const decryptor = new Decryptor(this.cipherMethod, this.cipherPassword);
-      decryptor.on('error', (err) => {
-        this.logger.error('decryptor error:', remoteAddr(this.socket), err);
-        proxy.destroy();
-      });
-      proxy.pipe(decryptor).pipe(this.socket);
-    });
+    this.tunnel.pipe(decryptor).pipe(this.socket);
   }
 
   async handle() {
@@ -209,6 +188,33 @@ class SocketHandler {
     if (finished) return;
 
     this.request();
+  }
+
+  async initTcpTunnel() {
+    const tunnel = net.createConnection(this.server_port, this.server);
+
+    tunnel.on('timeout', () => {
+      this.logger.warn('proxy socket timeout', remoteAddr(this.socket));
+      tunnel.destroy();
+    });
+
+    tunnel.on('error', (err) => {
+      this.logger.error('proxy socket error:', remoteAddr(this.socket), err);
+    });
+
+    tunnel.on('close', () => {
+      if (!this.socket.destroyed) {
+        this.socket.destroy();
+      }
+    });
+
+    await new Promise((resolve) => {
+      tunnel.on('connect', resolve);
+    });
+
+    tunnel.setNoDelay();
+    tunnel.setTimeout(this.timeout);
+    return tunnel;
   }
 }
 
