@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 
 import * as stream from 'stream';
-import * as util from 'util';
 import * as net from 'net';
-import * as dns from 'dns';
 import * as http from 'http';
 import { WebSocketServer, createWebSocketStream } from 'ws';
+import CacheableLookup from 'cacheable-lookup';
 import { config } from './config';
 import { Logger } from './logger';
 import * as ipv6 from './ipv6';
 
 const logger = new Logger('ss-server');
 const timeout = (config.timeout || 300) * 1000;
+const cacheable = new CacheableLookup();
 
 const server = http.createServer();
 const wss = new WebSocketServer({ server });
@@ -46,10 +46,12 @@ wss.on('connection', function connection(ws) {
   }
 
   ws.once('message', async function message(rawAddr: Buffer) {
+    tunnel = createWebSocketStream(ws);
+
     const rawAddrLen = rawAddr.length;
     let dstHost: string;
     let dstPort: number;
-    let isDomain = false;
+    let domain = '';
     let remainDataIndex = -1;
     if (rawAddr[0] === 0x01) {
       // ipv4
@@ -67,9 +69,7 @@ wss.on('connection', function connection(ws) {
         logger.warn('invalid domain data');
         return;
       }
-      isDomain = true;
-      dstHost = rawAddr.toString('ascii', 2, 2 + domainLen);
-      logger.info('domain:', dstHost);
+      domain = rawAddr.toString('ascii', 2, 2 + domainLen);
       dstPort = (rawAddr[2 + domainLen] << 8) | rawAddr[3 + domainLen];
       if (rawAddrLen > 4 + domainLen) remainDataIndex = 4 + domainLen;
     } else if (rawAddr[0] === 0x04) {
@@ -87,10 +87,10 @@ wss.on('connection', function connection(ws) {
     }
 
     // find ip by dns
-    if (isDomain) {
+    if (domain) {
       try {
-        const ips = await util.promisify(dns.resolve4)(dstHost);
-        dstHost = ips[0];
+        const resp = await cacheable.lookupAsync(domain);
+        dstHost = resp.address;
       } catch (err) {
         logger.warn('dns error');
         logger.error(err);
@@ -98,11 +98,10 @@ wss.on('connection', function connection(ws) {
       }
     }
 
-    logger.info('address: %s:%s', dstHost, dstPort);
+    logger.info('address: %s %s:%s', domain, dstHost, dstPort);
 
-    tunnel = createWebSocketStream(ws);
     tunnel.on('error', (err) => {
-      logger.error('websocket tunnel error:', err, dstPort, dstPort);
+      logger.error('websocket tunnel error:', domain, dstHost, dstPort, err);
     });
 
     const firstProxyPayload = remainDataIndex > -1 ? rawAddr.slice(remainDataIndex) : null;
