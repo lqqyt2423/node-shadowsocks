@@ -180,7 +180,7 @@ class SocketHandler {
 
     if (config.tunnel === 'tcp') {
       await this.useTcpTunnel(head);
-    } else if (config.tunnel === 'websocket') {
+    } else if (config.tunnel === 'ws' || config.tunnel === 'wss') {
       await this.useWebSocketTunnel(head);
     } else {
       throw new Error('should not be here');
@@ -236,7 +236,14 @@ class SocketHandler {
   }
 
   async useWebSocketTunnel(head: Buffer) {
-    const ws = new WebSocket(`ws://${this.server}:${this.server_port}`);
+    let endpoint = '';
+    if (this.server.startsWith('ws')) {
+      endpoint = this.server;
+    } else {
+      endpoint = `${config.tunnel}://${this.server}:${this.server_port}`;
+    }
+
+    const ws = new WebSocket(endpoint);
     const tunnel = createWebSocketStream(ws);
     this.tunnel = tunnel;
 
