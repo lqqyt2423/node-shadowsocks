@@ -7,6 +7,7 @@ import { config, IConfig, Method } from './config';
 import { Logger } from './logger';
 import { Encryptor, Decryptor } from './encrypt';
 import { HTTPProxy } from './http-proxy';
+import { parseAddressFromSocks5Head } from './utils';
 
 const logger = new Logger('ss-local');
 
@@ -145,22 +146,22 @@ class SocketHandler {
 
     if (data[2] !== 0x00) this.logger.warn('RESERVED should be 0x00');
 
-    let rawAddr: Buffer;
+    let head: Buffer;
     switch (data[3]) {
       case 0x01: // ipv4
         // 3(ver+cmd+rsv) + 1addrType + ipv4 + 2port
-        rawAddr = data.slice(3, 10);
+        head = data.slice(3, 10);
         break;
       case 0x03: {
         // domain
         const domainLen = data[4];
         // 3 + 1addrType + 1addrLen + 2port, plus addrLen
-        rawAddr = data.slice(3, 7 + domainLen);
+        head = data.slice(3, 7 + domainLen);
         break;
       }
       case 0x04: // ipv6
         // 3(ver+cmd+rsv) + 1addrType + ipv6 + 2port
-        rawAddr = data.slice(3, 22);
+        head = data.slice(3, 22);
         break;
       default:
         this.logger.error(`ATYP ${data[3]} not support`);
@@ -168,10 +169,19 @@ class SocketHandler {
         return this.socket.destroy();
     }
 
+    // only for log
+    parseAddressFromSocks5Head(head, false)
+      .then((address) => {
+        logger.info('address: %s %s:%s', address.domain, address.host, address.port);
+      })
+      .catch(() => {
+        // do nothing
+      });
+
     if (config.tunnel === 'tcp') {
-      await this.useTcpTunnel(rawAddr);
+      await this.useTcpTunnel(head);
     } else if (config.tunnel === 'websocket') {
-      await this.useWebSocketTunnel(rawAddr);
+      await this.useWebSocketTunnel(head);
     } else {
       throw new Error('should not be here');
     }
@@ -184,7 +194,7 @@ class SocketHandler {
     this.request();
   }
 
-  async useTcpTunnel(rawAddr: Buffer) {
+  async useTcpTunnel(head: Buffer) {
     const tunnel = net.createConnection(this.server_port, this.server);
     this.tunnel = tunnel;
 
@@ -214,7 +224,7 @@ class SocketHandler {
 
     const encryptor = new Encryptor(this.cipherMethod, this.cipherPassword);
     encryptor.pipe(this.tunnel);
-    encryptor.write(rawAddr);
+    encryptor.write(head);
     this.socket.pipe(encryptor);
 
     const decryptor = new Decryptor(this.cipherMethod, this.cipherPassword);
@@ -225,7 +235,7 @@ class SocketHandler {
     this.tunnel.pipe(decryptor).pipe(this.socket);
   }
 
-  async useWebSocketTunnel(rawAddr: Buffer) {
+  async useWebSocketTunnel(head: Buffer) {
     const ws = new WebSocket(`ws://${this.server}:${this.server_port}`);
     const tunnel = createWebSocketStream(ws);
     this.tunnel = tunnel;
@@ -236,7 +246,7 @@ class SocketHandler {
 
     this.reply(0x00);
 
-    tunnel.write(rawAddr);
+    tunnel.write(head);
     this.socket.pipe(tunnel);
     tunnel.pipe(this.socket);
   }

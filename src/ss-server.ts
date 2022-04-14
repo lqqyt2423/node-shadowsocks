@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 
 import * as net from 'net';
-import * as dns from 'dns';
-import * as util from 'util';
-import * as ipv6 from './ipv6';
 import { config, IConfig, Method } from './config';
 import { Encryptor, Decryptor } from './encrypt';
 import { Logger } from './logger';
+import { IAddress, parseAddressFromSocks5Head } from './utils';
 
 const logger = new Logger('ss-server');
 
@@ -57,70 +55,22 @@ class SocketHandler {
     });
   }
 
-  async parseAddress(rawAddr: Buffer) {
-    const rawAddrLen = rawAddr.length;
-    let dstHost, dstPort;
-    let isDomain = false;
-    let remainDataIndex = -1;
-    if (rawAddr[0] === 0x01) {
-      // ipv4
-      if (rawAddr.length < 7) {
-        this.logger.warn('invalid ipv4 data');
-        this.socket.end();
-        return;
-      }
-      dstHost = `${rawAddr[1]}.${rawAddr[2]}.${rawAddr[3]}.${rawAddr[4]}`;
-      dstPort = (rawAddr[5] << 8) | rawAddr[6];
-      if (rawAddrLen > 7) remainDataIndex = 7;
-    } else if (rawAddr[0] === 0x03) {
-      // domain
-      const domainLen = rawAddr[1];
-      if (rawAddrLen < 4 + domainLen) {
-        this.logger.warn('invalid domain data');
-        this.socket.end();
-        return;
-      }
-      isDomain = true;
-      dstHost = rawAddr.toString('ascii', 2, 2 + domainLen);
-      this.logger.info('domain:', dstHost);
-      dstPort = (rawAddr[2 + domainLen] << 8) | rawAddr[3 + domainLen];
-      if (rawAddrLen > 4 + domainLen) remainDataIndex = 4 + domainLen;
-    } else if (rawAddr[0] === 0x04) {
-      // ipv6
-      if (rawAddrLen < 19) {
-        this.logger.warn('invalid ipv6 data');
-        this.socket.end();
-        return;
-      }
-      dstHost = ipv6.toStr(rawAddr.slice(1, 17));
-      dstPort = (rawAddr[17] << 8) | rawAddr[18];
-      if (rawAddrLen > 19) remainDataIndex = 19;
-    } else {
-      this.logger.warn(`ATYP ${rawAddr[0]} not support`);
+  async parseAddress(head: Buffer) {
+    let address: IAddress;
+    try {
+      address = await parseAddressFromSocks5Head(head);
+    } catch (err) {
+      this.logger.error(err);
       this.socket.end();
       return;
     }
 
-    // find ip by dns
-    if (isDomain) {
-      try {
-        const ips = await util.promisify(dns.resolve4)(dstHost);
-        dstHost = ips[0];
-      } catch (err) {
-        this.logger.warn('dns error');
-        this.logger.error(err);
-        this.socket.end();
-        return;
-      }
-    }
+    logger.info('address: %s %s:%s', address.domain, address.host, address.port);
 
-    this.logger.info('address: %s:%s', dstHost, dstPort);
-
-    const firstProxyPayload = remainDataIndex > -1 ? rawAddr.slice(remainDataIndex) : null;
-    this.handleProxy(dstPort, dstHost, firstProxyPayload);
+    this.handleProxy(address.port, address.host, address.headLeft);
   }
 
-  handleProxy(port: number, host: string, firstProxyPayload: Buffer) {
+  handleProxy(port: number, host: string, headLeft: Buffer) {
     // connect to real remote
     const proxy = (this.proxy = net.createConnection(port, host));
     proxy.setTimeout(this.timeout);
@@ -142,7 +92,7 @@ class SocketHandler {
       const encryptor = new Encryptor(this.cipherMethod, this.cipherPassword);
       proxy.pipe(encryptor).pipe(this.socket);
 
-      if (firstProxyPayload) proxy.write(firstProxyPayload);
+      if (headLeft) proxy.write(headLeft);
 
       this.decryptor.resume();
     });

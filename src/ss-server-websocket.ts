@@ -4,14 +4,12 @@ import * as stream from 'stream';
 import * as net from 'net';
 import * as http from 'http';
 import { WebSocketServer, createWebSocketStream } from 'ws';
-import CacheableLookup from 'cacheable-lookup';
 import { config } from './config';
 import { Logger } from './logger';
-import * as ipv6 from './ipv6';
+import { IAddress, parseAddressFromSocks5Head } from './utils';
 
 const logger = new Logger('ss-server');
 const timeout = (config.timeout || 300) * 1000;
-const cacheable = new CacheableLookup();
 
 const server = http.createServer();
 const wss = new WebSocketServer({ server });
@@ -19,7 +17,7 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', function connection(ws) {
   let tunnel: stream.Duplex;
 
-  function handleProxy(port: number, host: string, firstProxyPayload: Buffer) {
+  function handleProxy(port: number, host: string, headLeft: Buffer) {
     // connect to real remote
     const proxy = net.createConnection(port, host);
     proxy.setTimeout(timeout);
@@ -38,74 +36,31 @@ wss.on('connection', function connection(ws) {
     });
 
     proxy.once('connect', () => {
-      if (firstProxyPayload) proxy.write(firstProxyPayload);
+      if (headLeft) proxy.write(headLeft);
 
       tunnel.pipe(proxy);
       proxy.pipe(tunnel);
     });
   }
 
-  ws.once('message', async function message(rawAddr: Buffer) {
+  ws.once('message', async function message(head: Buffer) {
     tunnel = createWebSocketStream(ws);
 
-    const rawAddrLen = rawAddr.length;
-    let dstHost: string;
-    let dstPort: number;
-    let domain = '';
-    let remainDataIndex = -1;
-    if (rawAddr[0] === 0x01) {
-      // ipv4
-      if (rawAddr.length < 7) {
-        logger.warn('invalid ipv4 data');
-        return;
-      }
-      dstHost = `${rawAddr[1]}.${rawAddr[2]}.${rawAddr[3]}.${rawAddr[4]}`;
-      dstPort = (rawAddr[5] << 8) | rawAddr[6];
-      if (rawAddrLen > 7) remainDataIndex = 7;
-    } else if (rawAddr[0] === 0x03) {
-      // domain
-      const domainLen = rawAddr[1];
-      if (rawAddrLen < 4 + domainLen) {
-        logger.warn('invalid domain data');
-        return;
-      }
-      domain = rawAddr.toString('ascii', 2, 2 + domainLen);
-      dstPort = (rawAddr[2 + domainLen] << 8) | rawAddr[3 + domainLen];
-      if (rawAddrLen > 4 + domainLen) remainDataIndex = 4 + domainLen;
-    } else if (rawAddr[0] === 0x04) {
-      // ipv6
-      if (rawAddrLen < 19) {
-        logger.warn('invalid ipv6 data');
-        return;
-      }
-      dstHost = ipv6.toStr(rawAddr.slice(1, 17));
-      dstPort = (rawAddr[17] << 8) | rawAddr[18];
-      if (rawAddrLen > 19) remainDataIndex = 19;
-    } else {
-      logger.warn(`ATYP ${rawAddr[0]} not support`);
+    let address: IAddress;
+    try {
+      address = await parseAddressFromSocks5Head(head);
+    } catch (err) {
+      logger.error(err);
       return;
     }
 
-    // find ip by dns
-    if (domain) {
-      try {
-        const resp = await cacheable.lookupAsync(domain);
-        dstHost = resp.address;
-      } catch (err) {
-        logger.warn('dns error');
-        logger.error(err);
-        return;
-      }
-    }
-
-    logger.info('address: %s %s:%s', domain, dstHost, dstPort);
+    logger.info('address: %s %s:%s', address.domain, address.host, address.port);
 
     tunnel.on('error', (err) => {
-      logger.error('websocket tunnel error:', domain, dstHost, dstPort, err);
+      logger.error('websocket tunnel error:', address.domain, address.host, address.port, err);
     });
 
-    const firstProxyPayload = remainDataIndex > -1 ? rawAddr.slice(remainDataIndex) : null;
-    handleProxy(dstPort, dstHost, firstProxyPayload);
+    handleProxy(address.port, address.host, address.headLeft);
   });
 });
 
