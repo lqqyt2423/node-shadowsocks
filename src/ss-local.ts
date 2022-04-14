@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
+import * as stream from 'stream';
 import * as net from 'net';
+import { WebSocket, createWebSocketStream } from 'ws';
 import { config, IConfig, Method } from './config';
 import { Logger } from './logger';
 import { Encryptor, Decryptor } from './encrypt';
 import { HTTPProxy } from './http-proxy';
-import * as stream from 'stream';
 
 const logger = new Logger('ss-local');
 
@@ -170,7 +171,7 @@ class SocketHandler {
     if (config.tunnel === 'tcp') {
       await this.useTcpTunnel(rawAddr);
     } else if (config.tunnel === 'websocket') {
-      // todo
+      await this.useWebSocketTunnel(rawAddr);
     } else {
       throw new Error('should not be here');
     }
@@ -188,12 +189,12 @@ class SocketHandler {
     this.tunnel = tunnel;
 
     tunnel.on('timeout', () => {
-      this.logger.warn('proxy socket timeout', remoteAddr(this.socket));
+      this.logger.warn('tcp tunnel timeout', remoteAddr(this.socket));
       tunnel.destroy();
     });
 
     tunnel.on('error', (err) => {
-      this.logger.error('proxy socket error:', remoteAddr(this.socket), err);
+      this.logger.error('tcp tunnel error:', remoteAddr(this.socket), err);
     });
 
     tunnel.on('close', () => {
@@ -222,6 +223,22 @@ class SocketHandler {
       this.tunnel.destroy();
     });
     this.tunnel.pipe(decryptor).pipe(this.socket);
+  }
+
+  async useWebSocketTunnel(rawAddr: Buffer) {
+    const ws = new WebSocket(`ws://${this.server}:${this.server_port}`);
+    const tunnel = createWebSocketStream(ws);
+    this.tunnel = tunnel;
+
+    tunnel.on('error', (err) => {
+      this.logger.error('websocket tunnel error:', remoteAddr(this.socket), err);
+    });
+
+    this.reply(0x00);
+
+    tunnel.write(rawAddr);
+    this.socket.pipe(tunnel);
+    tunnel.pipe(this.socket);
   }
 }
 
