@@ -167,20 +167,13 @@ class SocketHandler {
         return this.socket.destroy();
     }
 
-    this.tunnel = await this.initTcpTunnel();
-    this.reply(0x00);
-
-    const encryptor = new Encryptor(this.cipherMethod, this.cipherPassword);
-    encryptor.pipe(this.tunnel);
-    encryptor.write(rawAddr);
-    this.socket.pipe(encryptor);
-
-    const decryptor = new Decryptor(this.cipherMethod, this.cipherPassword);
-    decryptor.on('error', (err) => {
-      this.logger.error('decryptor error:', remoteAddr(this.socket), err);
-      this.tunnel.destroy();
-    });
-    this.tunnel.pipe(decryptor).pipe(this.socket);
+    if (config.tunnel === 'tcp') {
+      await this.useTcpTunnel(rawAddr);
+    } else if (config.tunnel === 'websocket') {
+      // todo
+    } else {
+      throw new Error('should not be here');
+    }
   }
 
   async handle() {
@@ -190,8 +183,9 @@ class SocketHandler {
     this.request();
   }
 
-  async initTcpTunnel() {
+  async useTcpTunnel(rawAddr: Buffer) {
     const tunnel = net.createConnection(this.server_port, this.server);
+    this.tunnel = tunnel;
 
     tunnel.on('timeout', () => {
       this.logger.warn('proxy socket timeout', remoteAddr(this.socket));
@@ -214,7 +208,20 @@ class SocketHandler {
 
     tunnel.setNoDelay();
     tunnel.setTimeout(this.timeout);
-    return tunnel;
+
+    this.reply(0x00);
+
+    const encryptor = new Encryptor(this.cipherMethod, this.cipherPassword);
+    encryptor.pipe(this.tunnel);
+    encryptor.write(rawAddr);
+    this.socket.pipe(encryptor);
+
+    const decryptor = new Decryptor(this.cipherMethod, this.cipherPassword);
+    decryptor.on('error', (err) => {
+      this.logger.error('decryptor error:', remoteAddr(this.socket), err);
+      this.tunnel.destroy();
+    });
+    this.tunnel.pipe(decryptor).pipe(this.socket);
   }
 }
 
