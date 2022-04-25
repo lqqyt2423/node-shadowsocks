@@ -89,11 +89,11 @@ wss.on('connection', function connection(ws) {
   });
 
   decryptor.on('data', (chunk) => {
-    proxy.write(chunk);
+    proxy?.write(chunk);
   });
 
   decryptor.on('end', () => {
-    proxy.end();
+    proxy?.end();
   });
 
   tunnel.pipe(decryptor);
