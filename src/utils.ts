@@ -1,16 +1,28 @@
 import CacheableLookup from 'cacheable-lookup';
 import * as ipv6 from './ipv6';
+import * as util from 'util';
 
 const cacheable = new CacheableLookup();
 
 type ATYP = 'ipv4' | 'ipv6' | 'domain';
 
-export interface IAddress {
+export class Address {
+  static count = 0;
+
+  id: number;
   type: ATYP;
   host: string;
   port: number;
   domain: string;
   headLeft: Buffer;
+
+  constructor() {
+    this.id = ++Address.count;
+  }
+
+  info() {
+    return util.format('address<%s>: %s %s:%s', this.id, this.domain, this.host, this.port);
+  }
 }
 
 //   +------+----------+----------+
@@ -18,7 +30,7 @@ export interface IAddress {
 //   +------+----------+----------+
 //   |  1   | Variable |    2     |
 //   +------+----------+----------+
-export async function parseAddressFromSocks5Head(head: Buffer, dnslookup = true): Promise<IAddress> {
+export async function parseAddressFromSocks5Head(head: Buffer, dnslookup = true): Promise<Address> {
   const headLen = head.length;
   let type: ATYP;
   let host = '';
@@ -66,11 +78,11 @@ export async function parseAddressFromSocks5Head(head: Buffer, dnslookup = true)
 
   const headLeft = remainDataIndex > -1 ? head.slice(remainDataIndex) : null;
 
-  return {
-    type,
-    host,
-    port,
-    domain,
-    headLeft,
-  };
+  const address = new Address();
+  address.type = type;
+  address.host = host;
+  address.port = port;
+  address.domain = domain;
+  address.headLeft = headLeft;
+  return address;
 }

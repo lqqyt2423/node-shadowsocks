@@ -7,7 +7,7 @@ import { config, IConfig, Method } from './config';
 import { Logger } from './logger';
 import { Encryptor, Decryptor } from './encrypt';
 import { HTTPProxy } from './http-proxy';
-import { parseAddressFromSocks5Head } from './utils';
+import { Address, parseAddressFromSocks5Head } from './utils';
 
 const logger = new Logger('ss-local');
 
@@ -28,6 +28,7 @@ class SocketHandler {
   private server: string;
   private cipherMethod: Method;
   private cipherPassword: string;
+  private address: Address;
 
   constructor(socket: net.Socket, options: IOptions) {
     this.socket = socket;
@@ -47,7 +48,7 @@ class SocketHandler {
     this.socket.setTimeout(this.timeout);
 
     this.socket.on('timeout', () => {
-      this.logger.warn('socket timeout', remoteAddr(this.socket));
+      this.logger.warn('socket timeout', this.address?.info(), remoteAddr(this.socket));
       this.socket.destroy();
     });
 
@@ -172,7 +173,8 @@ class SocketHandler {
     // only for log
     parseAddressFromSocks5Head(head, false)
       .then((address) => {
-        logger.info('address: %s %s:%s', address.domain, address.host, address.port);
+        this.address = address;
+        logger.info('begin proxy', address.info());
       })
       .catch(() => {
         // do nothing
@@ -247,8 +249,12 @@ class SocketHandler {
     const tunnel = createWebSocketStream(ws);
     this.tunnel = tunnel;
 
+    tunnel.on('close', () => {
+      this.logger.info('websocket tunnel close:', this.address?.info(), remoteAddr(this.socket));
+    });
+
     tunnel.on('error', (err) => {
-      this.logger.error('websocket tunnel error:', remoteAddr(this.socket), err);
+      this.logger.error('websocket tunnel error:', this.address?.info(), remoteAddr(this.socket), err);
     });
 
     this.reply(0x00);

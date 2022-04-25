@@ -6,7 +6,7 @@ import * as http from 'http';
 import { WebSocketServer, createWebSocketStream } from 'ws';
 import { config } from './config';
 import { Logger } from './logger';
-import { IAddress, parseAddressFromSocks5Head } from './utils';
+import { Address, parseAddressFromSocks5Head } from './utils';
 
 const logger = new Logger('ss-server');
 const timeout = (config.timeout || 300) * 1000;
@@ -17,20 +17,27 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', function connection(ws) {
   let tunnel: stream.Duplex;
 
-  function handleProxy(port: number, host: string, headLeft: Buffer) {
+  function handleProxy(address: Address) {
+    const { port, host, headLeft } = address;
+
     // connect to real remote
     const proxy = net.createConnection(port, host);
+    proxy.setNoDelay();
     proxy.setTimeout(timeout);
 
     proxy.on('error', (err) => {
-      logger.warn('proxy error');
-      logger.error(err);
+      if (['ETIMEDOUT', 'ECONNRESET'].includes((err as any).code)) {
+        logger.warn('proxy error', address.info(), err.message);
+      } else {
+        logger.error('proxy error', address.info(), err);
+      }
+
       if (!proxy.destroyed) proxy.destroy();
       ws.close();
     });
 
     proxy.on('timeout', () => {
-      logger.warn('proxy timeout');
+      logger.warn('proxy timeout', address.info());
       proxy.end();
       ws.close();
     });
@@ -46,7 +53,7 @@ wss.on('connection', function connection(ws) {
   ws.once('message', async function message(head: Buffer) {
     tunnel = createWebSocketStream(ws);
 
-    let address: IAddress;
+    let address: Address;
     try {
       address = await parseAddressFromSocks5Head(head);
     } catch (err) {
@@ -54,13 +61,21 @@ wss.on('connection', function connection(ws) {
       return;
     }
 
-    logger.info('address: %s %s:%s', address.domain, address.host, address.port);
+    logger.info('begin proxy', address.info());
 
-    tunnel.on('error', (err) => {
-      logger.error('websocket tunnel error:', address.domain, address.host, address.port, err);
+    tunnel.on('close', () => {
+      logger.info('websocket tunnel close:', address.info());
     });
 
-    handleProxy(address.port, address.host, address.headLeft);
+    tunnel.on('error', (err) => {
+      if (err.message.includes('WebSocket is not open')) {
+        logger.warn('websocket tunnel error:', address.info(), err.message);
+      } else {
+        logger.error('websocket tunnel error:', address.info(), err);
+      }
+    });
+
+    handleProxy(address);
   });
 });
 

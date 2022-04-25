@@ -8,7 +8,8 @@
     "ss-server": "node dist/ss-server.js",
     "build": "tsc",
     "rebuild": "rm -rf dist && npm run build",
-    "dev": "nodemon --watch src -e ts --exec \"(tsc && node dist/ss-local.js) || exit 1\"",
+    "dev-local": "nodemon --watch src -e ts --exec \"(tsc && node dist/ss-local.js) || exit 1\"",
+    "dev-server": "nodemon --watch src -e ts --exec \"(tsc && node dist/ss-server-websocket.js) || exit 1\"",
     "lint": "eslint ."
   },
   "devDependencies": {

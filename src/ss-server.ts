@@ -4,7 +4,7 @@ import * as net from 'net';
 import { config, IConfig, Method } from './config';
 import { Encryptor, Decryptor } from './encrypt';
 import { Logger } from './logger';
-import { IAddress, parseAddressFromSocks5Head } from './utils';
+import { Address, parseAddressFromSocks5Head } from './utils';
 
 const logger = new Logger('ss-server');
 
@@ -56,7 +56,7 @@ class SocketHandler {
   }
 
   async parseAddress(head: Buffer) {
-    let address: IAddress;
+    let address: Address;
     try {
       address = await parseAddressFromSocks5Head(head);
     } catch (err) {
@@ -65,12 +65,14 @@ class SocketHandler {
       return;
     }
 
-    logger.info('address: %s %s:%s', address.domain, address.host, address.port);
+    logger.info(address.info());
 
-    this.handleProxy(address.port, address.host, address.headLeft);
+    this.handleProxy(address);
   }
 
-  handleProxy(port: number, host: string, headLeft: Buffer) {
+  handleProxy(address: Address) {
+    const { port, host, headLeft } = address;
+
     // connect to real remote
     const proxy = (this.proxy = net.createConnection(port, host));
     proxy.setTimeout(this.timeout);
