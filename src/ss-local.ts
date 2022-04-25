@@ -223,18 +223,7 @@ class SocketHandler {
     tunnel.setTimeout(this.timeout);
 
     this.reply(0x00);
-
-    const encryptor = new Encryptor(this.cipherMethod, this.cipherPassword);
-    encryptor.pipe(this.tunnel);
-    encryptor.write(head);
-    this.socket.pipe(encryptor);
-
-    const decryptor = new Decryptor(this.cipherMethod, this.cipherPassword);
-    decryptor.on('error', (err) => {
-      this.logger.error('decryptor error:', remoteAddr(this.socket), err);
-      this.tunnel.destroy();
-    });
-    this.tunnel.pipe(decryptor).pipe(this.socket);
+    this.transfer(head);
   }
 
   async useWebSocketTunnel(head: Buffer) {
@@ -258,10 +247,21 @@ class SocketHandler {
     });
 
     this.reply(0x00);
+    this.transfer(head);
+  }
 
-    tunnel.write(head);
-    this.socket.pipe(tunnel);
-    tunnel.pipe(this.socket);
+  private transfer(head: Buffer) {
+    const encryptor = new Encryptor(this.cipherMethod, this.cipherPassword);
+    encryptor.pipe(this.tunnel);
+    encryptor.write(head);
+    this.socket.pipe(encryptor);
+
+    const decryptor = new Decryptor(this.cipherMethod, this.cipherPassword);
+    decryptor.on('error', (err) => {
+      this.logger.error('decryptor error:', remoteAddr(this.socket), err);
+      this.tunnel.destroy();
+    });
+    this.tunnel.pipe(decryptor).pipe(this.socket);
   }
 }
 

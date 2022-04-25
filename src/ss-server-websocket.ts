@@ -5,6 +5,7 @@ import * as net from 'net';
 import * as http from 'http';
 import { WebSocketServer, createWebSocketStream } from 'ws';
 import { config } from './config';
+import { Encryptor, Decryptor } from './encrypt';
 import { Logger } from './logger';
 import { Address, parseAddressFromSocks5Head } from './utils';
 
@@ -15,13 +16,35 @@ const server = http.createServer();
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', function connection(ws) {
-  let tunnel: stream.Duplex;
+  let proxy: net.Socket;
+  let address: Address;
+  const tunnel: stream.Duplex = createWebSocketStream(ws);
 
-  function handleProxy(address: Address) {
+  tunnel.on('close', () => {
+    logger.info('websocket tunnel close:', address?.info());
+  });
+
+  tunnel.on('error', (err) => {
+    if (err.message.includes('WebSocket is not open')) {
+      logger.warn('websocket tunnel error:', address?.info(), err.message);
+    } else {
+      logger.error('websocket tunnel error:', address?.info(), err);
+    }
+  });
+
+  const decryptor = new Decryptor(config.method, config.password, { emitFirstPayload: true });
+
+  decryptor.on('error', (err) => {
+    logger.error('decryptor error', err);
+    if (proxy && !proxy.destroyed) proxy.destroy();
+    ws.close();
+  });
+
+  function handleProxy() {
     const { port, host, headLeft } = address;
 
     // connect to real remote
-    const proxy = net.createConnection(port, host);
+    proxy = net.createConnection(port, host);
     proxy.setNoDelay();
     proxy.setTimeout(timeout);
 
@@ -43,40 +66,37 @@ wss.on('connection', function connection(ws) {
     });
 
     proxy.once('connect', () => {
+      const encryptor = new Encryptor(config.method, config.password);
+      proxy.pipe(encryptor).pipe(tunnel);
+
       if (headLeft) proxy.write(headLeft);
 
-      tunnel.pipe(proxy);
-      proxy.pipe(tunnel);
+      decryptor.resume();
     });
   }
 
-  ws.once('message', async function message(head: Buffer) {
-    tunnel = createWebSocketStream(ws);
+  decryptor.once('firstPayload', async (head: Buffer) => {
+    decryptor.pause();
 
-    let address: Address;
     try {
       address = await parseAddressFromSocks5Head(head);
     } catch (err) {
       logger.error(err);
       return;
     }
-
     logger.info('begin proxy', address.info());
-
-    tunnel.on('close', () => {
-      logger.info('websocket tunnel close:', address.info());
-    });
-
-    tunnel.on('error', (err) => {
-      if (err.message.includes('WebSocket is not open')) {
-        logger.warn('websocket tunnel error:', address.info(), err.message);
-      } else {
-        logger.error('websocket tunnel error:', address.info(), err);
-      }
-    });
-
-    handleProxy(address);
+    handleProxy();
   });
+
+  decryptor.on('data', (chunk) => {
+    proxy.write(chunk);
+  });
+
+  decryptor.on('end', () => {
+    proxy.end();
+  });
+
+  tunnel.pipe(decryptor);
 });
 
 server.listen(config.server_port, () => {
