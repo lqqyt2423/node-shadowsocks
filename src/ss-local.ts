@@ -52,7 +52,11 @@ class SocketHandler {
     });
 
     this.socket.on('error', (err) => {
-      logger.error('socket error:', remoteAddr(this.socket), err);
+      if (['ECONNRESET'].includes((err as any).code)) {
+        logger.warn('socket error', this.address?.info(), remoteAddr(this.socket), err.message);
+      } else {
+        logger.error('socket error', this.address?.info(), remoteAddr(this.socket), err);
+      }
     });
 
     this.socket.on('close', () => {
@@ -252,7 +256,11 @@ class SocketHandler {
     });
 
     tunnel.on('error', (err) => {
-      this.logger.error('websocket tunnel error:', this.address?.info(), remoteAddr(this.socket), err);
+      if (err.message.includes('WebSocket was closed')) {
+        this.logger.warn('websocket tunnel error:', this.address?.info(), remoteAddr(this.socket), err.message);
+      } else {
+        this.logger.error('websocket tunnel error:', this.address?.info(), remoteAddr(this.socket), err);
+      }
     });
 
     this.reply(0x00);
