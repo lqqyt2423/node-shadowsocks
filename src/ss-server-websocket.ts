@@ -81,6 +81,7 @@ wss.on('connection', function connection(ws) {
       address = await parseAddressFromSocks5Head(head);
     } catch (err) {
       logger.error(err);
+      ws.close();
       return;
     }
     logger.info('begin proxy', address.info());

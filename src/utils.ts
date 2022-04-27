@@ -1,8 +1,10 @@
 import CacheableLookup from 'cacheable-lookup';
 import * as ipv6 from './ipv6';
 import * as util from 'util';
+import { Logger } from './logger';
 
 const cacheable = new CacheableLookup();
+const logger = new Logger('utils');
 
 type ATYP = 'ipv4' | 'ipv6' | 'domain';
 
@@ -31,6 +33,8 @@ export class Address {
 //   |  1   | Variable |    2     |
 //   +------+----------+----------+
 export async function parseAddressFromSocks5Head(head: Buffer, dnslookup = true): Promise<Address> {
+  const address = new Address();
+
   const headLen = head.length;
   let type: ATYP;
   let host = '';
@@ -72,13 +76,17 @@ export async function parseAddressFromSocks5Head(head: Buffer, dnslookup = true)
 
   // find ip by dns
   if (domain && dnslookup) {
-    const resp = await cacheable.lookupAsync(domain);
-    host = resp.address;
+    const start = Date.now();
+    try {
+      const resp = await cacheable.lookupAsync(domain);
+      host = resp.address;
+    } finally {
+      logger.info('lookup %s:%s cost %s ms', address.id, domain, Date.now() - start);
+    }
   }
 
   const headLeft = remainDataIndex > -1 ? head.slice(remainDataIndex) : null;
 
-  const address = new Address();
   address.type = type;
   address.host = host;
   address.port = port;
