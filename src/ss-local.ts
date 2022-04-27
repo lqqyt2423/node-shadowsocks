@@ -44,7 +44,6 @@ class SocketHandler {
   }
 
   init() {
-    this.socket.setNoDelay();
     this.socket.setTimeout(this.timeout);
 
     this.socket.on('timeout', () => {
@@ -219,7 +218,6 @@ class SocketHandler {
       tunnel.on('connect', resolve);
     });
 
-    tunnel.setNoDelay();
     tunnel.setTimeout(this.timeout);
 
     this.reply(0x00);
