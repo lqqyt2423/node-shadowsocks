@@ -94,7 +94,7 @@ export class HTTPProxy {
 
   constructor(options: { port: number; socksHost: string; socksPort: number }) {
     this.port = options.port;
-    this.agent = new Socks5Agent({ socksHost: options.socksHost, socksPort: options.socksPort });
+    this.agent = new Socks5Agent({ socksHost: options.socksHost, socksPort: options.socksPort, keepAlive: true });
     this.socks5Client = new Socks5Client(options.socksHost, options.socksPort);
     this.server = this.createServer();
   }
