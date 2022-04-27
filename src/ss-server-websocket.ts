@@ -22,7 +22,6 @@ wss.on('connection', function connection(ws) {
 
     // connect to real remote
     const proxy = net.createConnection(port, host);
-    proxy.setNoDelay();
     proxy.setTimeout(timeout);
 
     proxy.on('error', (err) => {
