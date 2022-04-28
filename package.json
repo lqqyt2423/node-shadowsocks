@@ -13,6 +13,7 @@
     "lint": "eslint ."
   },
   "devDependencies": {
+    "@types/lru-cache": "^7.6.1",
     "@types/node": "^17.0.23",
     "@types/ws": "^8.5.3",
     "@typescript-eslint/eslint-plugin": "^5.19.0",
@@ -25,8 +26,11 @@
   "author": "liqiang",
   "license": "ISC",
   "dependencies": {
+    "@zcong/singleflight": "^0.3.0",
     "cacheable-lookup": "^6.0.4",
     "futoin-hkdf": "^1.5.0",
+    "is-ip": "^3.1.0",
+    "lru-cache": "^7.8.1",
     "ws": "^8.5.0"
   }
 }
