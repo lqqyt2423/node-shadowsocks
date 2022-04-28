@@ -1,10 +1,32 @@
-import CacheableLookup from 'cacheable-lookup';
+import * as dns from 'dns/promises';
+import * as LRU from 'lru-cache';
+import * as isIP from 'is-ip';
+import { Singleflight } from '@zcong/singleflight';
 import * as ipv6 from './ipv6';
 import * as util from 'util';
 import { Logger } from './logger';
 
-const cacheable = new CacheableLookup();
 const logger = new Logger('utils');
+
+const sf = new Singleflight();
+const cache = new LRU<string, string>({ max: 100, ttl: 1000 * 60 });
+
+async function rawLookup(hostname: string) {
+  const resp = await dns.lookup(hostname, { family: 4 });
+  await new Promise((resolve) => {
+    setTimeout(resolve, 1000);
+  });
+  return resp.address;
+}
+
+async function lookup(hostname: string) {
+  let resp = cache.get(hostname);
+  if (resp !== undefined) return resp;
+
+  resp = await sf.do(hostname, () => rawLookup(hostname));
+  cache.set(hostname, resp || null);
+  return resp;
+}
 
 type ATYP = 'ipv4' | 'ipv6' | 'domain';
 
@@ -76,12 +98,16 @@ export async function parseAddressFromSocks5Head(head: Buffer, dnslookup = true)
 
   // find ip by dns
   if (domain && dnslookup) {
-    const start = Date.now();
-    try {
-      const resp = await cacheable.lookupAsync(domain);
-      host = resp.address;
-    } finally {
-      logger.info('lookup %s:%s cost %s ms', address.id, domain, Date.now() - start);
+    if (isIP(domain)) {
+      host = domain;
+    } else {
+      const start = Date.now();
+      try {
+        host = await lookup(domain);
+        if (!host) throw new Error('lookup no ip');
+      } finally {
+        logger.info('lookup %s:%s cost %s ms', address.id, domain, Date.now() - start);
+      }
     }
   }
 
