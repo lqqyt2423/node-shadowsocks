@@ -13,9 +13,6 @@ const cache = new LRU<string, string>({ max: 100, ttl: 1000 * 60 });
 
 async function rawLookup(hostname: string) {
   const resp = await dns.lookup(hostname, { family: 4 });
-  await new Promise((resolve) => {
-    setTimeout(resolve, 1000);
-  });
   return resp.address;
 }
 
